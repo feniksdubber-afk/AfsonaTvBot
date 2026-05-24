@@ -56,7 +56,7 @@ class GivePremiumState(StatesGroup):
 
 # ── Helpers ────────────────────────────────────────────
 async def get_user_db(tg_id: int) -> dict | None:
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute("SELECT * FROM users WHERE tg_id = ?", (tg_id,)) as cur:
             row = await cur.fetchone()
             if row:
@@ -97,7 +97,7 @@ async def add_movie_start(message: Message, state: FSMContext):
 @router.message(AddMovieState.code)
 async def add_code(message: Message, state: FSMContext):
     code = message.text.strip().upper()
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute("SELECT 1 FROM movies WHERE code = ?", (code,)) as cur:
             if await cur.fetchone():
                 await message.answer(f"❌ <code>{code}</code> kodi allaqachon mavjud!", parse_mode="HTML")
@@ -218,7 +218,7 @@ async def add_video(message: Message, state: FSMContext):
 
     # Saqlash
     data = await state.get_data()
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute(
             """INSERT INTO movies
                (code, title, title_ru, description, genre, year, country,
@@ -250,7 +250,7 @@ async def add_video(message: Message, state: FSMContext):
 async def list_movies(message: Message):
     if not is_admin(message.from_user.id):
         return
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT id, code, title, is_premium, status, views FROM movies ORDER BY id DESC LIMIT 20"
         ) as cur:
@@ -277,7 +277,7 @@ async def list_movies(message: Message):
 @router.message(F.text.regexp(r'^[A-Z0-9]{3,10}$') & F.from_user.func(lambda u: u.id in ADMINS))
 async def admin_movie_detail(message: Message):
     code = message.text.strip().upper()
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute("SELECT * FROM movies WHERE code = ?", (code,)) as cur:
             row = await cur.fetchone()
             if not row:
@@ -362,7 +362,7 @@ async def edit_field_save(message: Message, state: FSMContext):
         value = message.text.strip()
         db_field = field
 
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute(
             f"UPDATE movies SET {db_field} = ? WHERE id = ?", (value, movie_id)
         )
@@ -384,7 +384,7 @@ async def del_movie_confirm(call: CallbackQuery):
 @router.callback_query(F.data.startswith("confirm_del_"))
 async def del_movie_execute(call: CallbackQuery):
     movie_id = int(call.data.split("_")[2])
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute("DELETE FROM movies WHERE id = ?", (movie_id,))
         await db.commit()
     await call.message.edit_text("✅ Kino o'chirildi!")
@@ -392,7 +392,7 @@ async def del_movie_execute(call: CallbackQuery):
 @router.callback_query(F.data.startswith("deactivate_"))
 async def deactivate_movie(call: CallbackQuery):
     movie_id = int(call.data.split("_")[1])
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute("UPDATE movies SET status = 'inactive' WHERE id = ?", (movie_id,))
         await db.commit()
     await call.answer("🔒 Faolsizlashtirildi!", show_alert=True)
@@ -400,7 +400,7 @@ async def deactivate_movie(call: CallbackQuery):
 @router.callback_query(F.data.startswith("activate_"))
 async def activate_movie(call: CallbackQuery):
     movie_id = int(call.data.split("_")[1])
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute("UPDATE movies SET status = 'active' WHERE id = ?", (movie_id,))
         await db.commit()
     await call.answer("✅ Faollashtirildi!", show_alert=True)
@@ -420,7 +420,7 @@ async def broadcast_start(message: Message, state: FSMContext):
 async def broadcast_send(message: Message, state: FSMContext):
     await state.clear()
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute("SELECT tg_id FROM users WHERE is_banned = 0") as cur:
             users = await cur.fetchall()
 
@@ -469,7 +469,7 @@ async def list_users(message: Message):
                 F.from_user.func(lambda u: u.id in ADMINS))
 async def find_user(message: Message):
     query = message.text.strip()
-    async with await get_db() as db:
+    async with get_db() as db:
         if query.startswith("@"):
             uname = query[1:]
             async with db.execute("SELECT * FROM users WHERE username = ?", (uname,)) as cur:
@@ -503,7 +503,7 @@ async def find_user(message: Message):
 @router.callback_query(F.data.startswith("ban_"))
 async def ban_user(call: CallbackQuery):
     user_id = int(call.data.split("_")[1])
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute("UPDATE users SET is_banned = 1 WHERE tg_id = ?", (user_id,))
         await db.commit()
     await call.answer("🚫 Foydalanuvchi banlandi!", show_alert=True)
@@ -512,7 +512,7 @@ async def ban_user(call: CallbackQuery):
 @router.callback_query(F.data.startswith("unban_"))
 async def unban_user(call: CallbackQuery):
     user_id = int(call.data.split("_")[1])
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute("UPDATE users SET is_banned = 0 WHERE tg_id = ?", (user_id,))
         await db.commit()
     await call.answer("✅ Ban olib tashlandi!", show_alert=True)
@@ -556,7 +556,7 @@ async def give_premium_save(message: Message, state: FSMContext):
     try:
         days = int(message.text.strip())
         until = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
-        async with await get_db() as db:
+        async with get_db() as db:
             await db.execute(
                 "UPDATE users SET is_premium = 1, premium_until = ? WHERE tg_id = ?",
                 (until, target)
@@ -583,7 +583,7 @@ async def show_stats(message: Message):
     if not is_admin(message.from_user.id):
         return
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute("SELECT COUNT(*) FROM users") as cur:
             total_users = (await cur.fetchone())[0]
         async with db.execute("SELECT COUNT(*) FROM users WHERE is_premium = 1") as cur:
@@ -631,7 +631,7 @@ async def export_csv(message: Message):
     if not is_admin(message.from_user.id):
         return
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT tg_id, full_name, username, lang, is_premium, balance, created_at FROM users"
         ) as cur:
@@ -655,7 +655,7 @@ async def movie_requests(message: Message):
     if not is_admin(message.from_user.id):
         return
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             """SELECT r.id, r.text, r.created_at, u.full_name, u.tg_id
                FROM movie_requests r JOIN users u ON r.user_id = u.tg_id
@@ -680,7 +680,7 @@ async def movie_requests(message: Message):
 @router.callback_query(F.data.startswith("req_accept_"))
 async def req_accept(call: CallbackQuery):
     req_id = int(call.data.split("_")[2])
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute(
             "UPDATE movie_requests SET status = 'accepted' WHERE id = ?", (req_id,)
         )
@@ -703,7 +703,7 @@ async def req_accept(call: CallbackQuery):
 @router.callback_query(F.data.startswith("req_reject_"))
 async def req_reject(call: CallbackQuery):
     req_id = int(call.data.split("_")[2])
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute(
             "UPDATE movie_requests SET status = 'rejected' WHERE id = ?", (req_id,)
         )

@@ -1,620 +1,184 @@
+```python
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
-from aiogram.filters import Command
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-
 from bot.database.db import get_db
-from bot.keyboards.user_kb import (
-    main_menu, movie_kb, rating_kb,
-    comments_kb, series_nav_kb, back_kb
-)
 
 router = Router()
 
-# ── FSM ────────────────────────────────────────────────
-class CommentState(StatesGroup):
-    waiting_text = State()
-    movie_id = State()
-
-class SearchState(StatesGroup):
-    waiting_query = State()
-
-# ── Helpers ────────────────────────────────────────────
-async def get_user(tg_id: int) -> dict | None:
-    async with get_db() as db:
-        async with db.execute(
-            "SELECT * FROM users WHERE tg_id = ?", (tg_id,)
-        ) as cur:
-            row = await cur.fetchone()
-            if row:
-                return dict(zip([d[0] for d in cur.description], row))
-    return None
-
-async def get_movie_by_code(code: str) -> dict | None:
-    async with get_db() as db:
-        async with db.execute(
-            "SELECT * FROM movies WHERE code = ? AND status = 'active'", (code,)
-        ) as cur:
-            row = await cur.fetchone()
-            if row:
-                return dict(zip([d[0] for d in cur.description], row))
-    return None
-
-async def is_favorite(user_id: int, movie_id: int) -> bool:
-    async with get_db() as db:
-        async with db.execute(
-            "SELECT 1 FROM favorites WHERE user_id = ? AND movie_id = ?",
-            (user_id, movie_id)
-        ) as cur:
-            return await cur.fetchone() is not None
-
-async def add_watch_history(user_id: int, movie_id: int):
-    async with get_db() as db:
-        await db.execute(
-            "INSERT INTO watch_history (user_id, movie_id) VALUES (?, ?)",
-            (user_id, movie_id)
-        )
-        await db.execute(
-            "UPDATE movies SET views = views + 1 WHERE id = ?", (movie_id,)
-        )
-        await db.commit()
-
-def txt(uz, ru, lang):
-    return uz if lang == "uz" else ru
-
-def movie_caption(m: dict, lang: str) -> str:
-    title = m["title_ru"] if lang == "ru" and m.get("title_ru") else m["title"]
-    genre = m.get("genre", "—")
-    year = m.get("year", "—")
-    country = m.get("country", "—")
-    rating = m.get("rating", 0)
-    views = m.get("views", 0)
-    desc = m.get("description", "")
-    premium_badge = "⭐ Premium\n" if m.get("is_premium") else ""
-    series_info = ""
-    if m.get("is_series"):
-        series_info = txt(
-            f"📺 Serial | Mavsum {m.get('season','?')} | {m.get('episode','?')}-qism\n",
-            f"📺 Сериал | Сезон {m.get('season','?')} | Серия {m.get('episode','?')}\n",
-            lang
-        )
-
-    return (
-        f"{premium_badge}"
-        f"🎬 <b>{title}</b>\n"
-        f"{series_info}"
-        f"🎭 {txt('Janr','Жанр',lang)}: {genre}\n"
-        f"📅 {txt('Yil','Год',lang)}: {year} | 🌍 {country}\n"
-        f"⭐ {txt('Reyting','Рейтинг',lang)}: {rating:.1f}/5\n"
-        f"👁 {txt('Ko\'rishlar','Просмотры',lang)}: {views:,}\n\n"
-        f"{desc}"
-    )
-
-# ── Kino kodi orqali izlash ────────────────────────────
-@router.message(F.text.regexp(r'^[A-Za-z0-9]{3,10}$'))
-async def find_movie_by_code(message: Message):
-    user = await get_user(message.from_user.id)
-    if not user:
-        return
-    lang = user["lang"]
-    code = message.text.strip().upper()
-
-    movie = await get_movie_by_code(code)
-    if not movie:
-        return  # Kod topilmasa — javob bermaymiz (raqam yoki boshqa narsa bo'lishi mumkin)
-
-    # Premium kino tekshirish
-    if movie["is_premium"] and not user["is_premium"]:
-        text = txt(
-            "⭐ Bu kino <b>Premium</b> foydalanuvchilar uchun.\n"
-            "Premium olish uchun /premium buyrug'ini yuboring.",
-            "⭐ Этот фильм доступен только для <b>Premium</b> пользователей.\n"
-            "Для получения Premium отправьте /premium.",
-            lang
-        )
-        await message.answer(text, parse_mode="HTML")
-        return
-
-    fav = await is_favorite(message.from_user.id, movie["id"])
-    caption = movie_caption(movie, lang)
-    await add_watch_history(message.from_user.id, movie["id"])
-
-    if movie.get("poster_id"):
-        await message.answer_photo(
-            photo=movie["poster_id"],
-            caption=caption,
-            reply_markup=movie_kb(movie["id"], fav, lang),
-            parse_mode="HTML"
-        )
-    else:
-        await message.answer(
-            caption,
-            reply_markup=movie_kb(movie["id"], fav, lang),
-            parse_mode="HTML"
-        )
-
-    # Videoni alohida yuborish
-    if movie.get("file_id"):
-        await message.answer_video(
-            video=movie["file_id"],
-            caption=f"🎬 {movie['title']}",
-            protect_content=True
-        )
-
-    # Serial bo'lsa navigatsiya
-    if movie.get("is_series"):
-        season = movie["season"]
-        episode = movie["episode"]
-        code_base = code[:-len(str(episode))] if str(episode) in code else code
-
+# ── 1. START DECODER TIZIMI ─────────────────────────────────────────
+@router.message(CommandStart(deep_link=True))
+async def cmd_start_deeplink_process(message: Message):
+    args = message.text.split()[1]
+    
+    # A. FILM CHIKARISH
+    if args.startswith("movie_"):
+        code = args.replace("movie_", "")
         async with get_db() as db:
-            async with db.execute(
-                "SELECT 1 FROM movies WHERE code = ? AND status = 'active'",
-                (f"{code_base}{episode+1}",)
-            ) as cur:
-                has_next = await cur.fetchone() is not None
-            async with db.execute(
-                "SELECT 1 FROM movies WHERE code = ? AND status = 'active'",
-                (f"{code_base}{episode-1}",)
-            ) as cur:
-                has_prev = episode > 1 and await cur.fetchone() is not None
+            async with db.execute("SELECT * FROM movies WHERE code = ?", (code,)) as cur:
+                movie = await cur.fetchone()
+                
+        if not movie:
+            await message.answer("❌ Kontent topilmadi yoki o'chirilgan!")
+            return
+            
+        # Ustunlarni nomlash
+        cols = ["id", "code", "title_uz", "title_ru", "country", "year", "genres", "description", "file_id", "poster_file_id", "is_premium", "status"]
+        m_dict = dict(zip(cols, movie))
+        
+        # Soft-delete va Arxiv tekshirish
+        if m_dict["status"] == "deleted":
+            await message.answer("❌ Kontent topilmadi!")
+            return
+        if m_dict["status"] == "archived":
+            await message.answer("⛔ Bu kontent vaqtinchalik arxivda.")
+            return
 
-        if has_next or has_prev:
-            nav_text = txt("📺 Navigatsiya:", "📺 Навигация:", lang)
-            await message.answer(
-                nav_text,
-                reply_markup=series_nav_kb(code_base, season, episode, has_next, has_prev)
-            )
-
-
-# ── Serial navigatsiya callback ────────────────────────
-@router.callback_query(F.data.startswith("ep_"))
-async def episode_nav(call: CallbackQuery):
-    _, code_base, season, episode = call.data.split("_")
-    code = f"{code_base}{episode}"
-    user = await get_user(call.from_user.id)
-    lang = user["lang"]
-
-    movie = await get_movie_by_code(code)
-    if not movie:
-        await call.answer(txt("Qism topilmadi!", "Серия не найдена!", lang), show_alert=True)
-        return
-
-    await call.answer()
-    fav = await is_favorite(call.from_user.id, movie["id"])
-    caption = movie_caption(movie, lang)
-    await add_watch_history(call.from_user.id, movie["id"])
-
-    if movie.get("file_id"):
-        await call.message.answer_video(
-            video=movie["file_id"],
-            caption=caption,
-            reply_markup=movie_kb(movie["id"], fav, lang),
-            protect_content=True,
-            parse_mode="HTML"
+        caption = (
+            f"🎬 <b>{m_dict['title_uz']}</b> ({m_dict['year']})\n"
+            f"🎭 {m_dict['genres']}\n"
+            f"🌍 {m_dict['country']}\n\n"
+            f"🍿 {m_dict['description']}"
         )
+        
+        # Views sonini oshirish
+        async with get_db() as db:
+            await db.execute("UPDATE movies SET views = views + 1 WHERE id = ?", (m_dict['id'],))
+            await db.commit()
 
+        await message.answer_video(video=m_dict['file_id'], caption=caption, parse_mode="HTML")
 
-# ── Qidirish ───────────────────────────────────────────
-@router.message(F.text.in_(["🔍 Qidirish", "🔍 Поиск"]))
-async def search_start(message: Message, state: FSMContext):
-    user = await get_user(message.from_user.id)
-    lang = user["lang"]
-    text = txt(
-        "🔍 Kino nomini yozing:",
-        "🔍 Введите название фильма:",
-        lang
-    )
-    await message.answer(text)
-    await state.set_state(SearchState.waiting_query)
+    # B. SERIAL INFOSINI CHIKARISH
+    elif args.startswith("series_"):
+        code = args.replace("series_", "")
+        async with get_db() as db:
+            async with db.execute("SELECT * FROM series WHERE code = ?", (code,)) as cur:
+                series = await cur.fetchone()
+                
+        if not series:
+            await message.answer("❌ Serial topilmadi!")
+            return
+            
+        cols = ["id", "code", "title_uz", "title_ru", "country", "year", "genres", "poster_file_id", "description", "is_premium", "status"]
+        s_dict = dict(zip(cols, series))
+        
+        if s_dict["status"] == "deleted":
+            await message.answer("❌ Kontent topilmadi!")
+            return
+        if s_dict["status"] == "archived":
+            await message.answer("⛔ Bu kontent vaqtinchalik arxivda.")
+            return
 
-@router.message(SearchState.waiting_query)
-async def search_movies(message: Message, state: FSMContext):
-    user = await get_user(message.from_user.id)
-    lang = user["lang"]
-    query = f"%{message.text.strip()}%"
+        # Fasllarni bazadan olish
+        async with get_db() as db:
+            async with db.execute("SELECT season_number FROM seasons WHERE series_id = ? ORDER BY season_number", (s_dict['id'],)) as cur:
+                seasons = await cur.fetchall()
 
+        kb_buttons = []
+        for row in seasons:
+            kb_buttons.append([InlineKeyboardButton(text=f"📀 {row[0]}-Fasl", callback_data=f"show_season_{s_dict['id']}_{row[0]}")])
+            
+        kb = InlineKeyboardMarkup(inline_keyboard=kb_buttons)
+        caption = (
+            f"📺 <b>{s_dict['title_uz']}</b> ({s_dict['year']})\n"
+            f"🎭 Janr: {s_dict['genres']}\n"
+            f"🌍 Davlat: {s_dict['country']}\n\n"
+            f"🍿 {s_dict['description']}\n\n"
+            f"👇 Faslni tanlang:"
+        )
+        
+        await message.answer_photo(photo=s_dict['poster_file_id'], caption=caption, reply_markup=kb, parse_mode="HTML")
+
+# ── 2. FASL BOSILGANDA QISMLARNI CHIKARISH ───────────────────────────
+@router.callback_query(F.data.startswith("show_season_"))
+async def cb_show_season_episodes(call: CallbackQuery):
+    parts = call.data.split("_")
+    series_id = int(parts[2])
+    season_num = int(parts[3])
+    
     async with get_db() as db:
-        async with db.execute(
-            """SELECT code, title, year, is_premium FROM movies
-               WHERE (title LIKE ? OR title_ru LIKE ?) AND status = 'active'
-               LIMIT 10""",
-            (query, query)
-        ) as cur:
-            rows = await cur.fetchall()
-
-    await state.clear()
-
-    if not rows:
-        text = txt("🔍 Hech narsa topilmadi.", "🔍 Ничего не найдено.", lang)
-        await message.answer(text, reply_markup=main_menu(lang))
+        async with db.execute("""
+            SELECT episode_number, id FROM episodes 
+            WHERE series_id = ? AND season_number = ? 
+            ORDER BY episode_number
+        """, (series_id, season_num)) as cur:
+            episodes = await cur.fetchall()
+            
+    if not episodes:
+        await call.answer("⚠️ Bu faslda qismlar yuklanmagan!", show_alert=True)
         return
-
-    lines = []
-    for r in rows:
-        premium = "⭐" if r[3] else "🎬"
-        lines.append(f"{premium} <code>{r[0]}</code> — {r[1]} ({r[2] or '?'})")
-
-    text = txt(
-        f"🔍 <b>Natijalar:</b>\n\n" + "\n".join(lines) + "\n\n📌 Kodni yuboring — bot ko'rsatadi.",
-        f"🔍 <b>Результаты:</b>\n\n" + "\n".join(lines) + "\n\n📌 Отправьте код — бот покажет.",
-        lang
+        
+    kb_buttons = []
+    row_btns = []
+    for i, ep in enumerate(episodes):
+        row_btns.append(InlineKeyboardButton(text=f"{ep[0]}-qism", callback_data=f"play_ep_{ep[1]}"))
+        # Har 3 ta tugmani bitta qatorga jamlaymiz
+        if len(row_btns) == 3 or i == len(episodes) - 1:
+            kb_buttons.append(row_btns)
+            row_btns = []
+            
+    kb_buttons.append([InlineKeyboardButton(text="◀️ Fasllarga qaytish", callback_data=f"back_to_series_{series_id}")])
+    kb = InlineKeyboardMarkup(inline_keyboard=kb_buttons)
+    
+    await call.message.edit_caption(
+        caption=f"📀 **{season_num}-Fasl qismlari:**\n\nTomosha qilmoqchi bo'lgan qismni tanlang:", 
+        reply_markup=kb, 
+        parse_mode="Markdown"
     )
-    await message.answer(text, reply_markup=main_menu(lang), parse_mode="HTML")
-
-
-# ── Sevimlilarga qo'shish/olib tashlash ───────────────
-@router.callback_query(F.data.startswith("fav_"))
-async def toggle_favorite(call: CallbackQuery):
-    movie_id = int(call.data.split("_")[1])
-    user = await get_user(call.from_user.id)
-    lang = user["lang"]
-    fav = await is_favorite(call.from_user.id, movie_id)
-
-    async with get_db() as db:
-        if fav:
-            await db.execute(
-                "DELETE FROM favorites WHERE user_id = ? AND movie_id = ?",
-                (call.from_user.id, movie_id)
-            )
-            msg = txt("💔 Sevimlilardan olib tashlandi!", "💔 Убрано из избранного!", lang)
-        else:
-            await db.execute(
-                "INSERT OR IGNORE INTO favorites (user_id, movie_id) VALUES (?, ?)",
-                (call.from_user.id, movie_id)
-            )
-            msg = txt("❤️ Sevimlilarga qo'shildi!", "❤️ Добавлено в избранное!", lang)
-        await db.commit()
-
-    await call.answer(msg)
-    await call.message.edit_reply_markup(
-        reply_markup=movie_kb(movie_id, not fav, lang)
-    )
-
-
-# ── Reyting ────────────────────────────────────────────
-@router.callback_query(F.data.startswith("rate_"))
-async def show_rating(call: CallbackQuery):
-    movie_id = int(call.data.split("_")[1])
-    user = await get_user(call.from_user.id)
-    lang = user["lang"]
-    text = txt("⭐ Reytingni tanlang:", "⭐ Выберите рейтинг:", lang)
-    await call.message.answer(text, reply_markup=rating_kb(movie_id))
     await call.answer()
 
-@router.callback_query(F.data.startswith("setrate_"))
-async def set_rating(call: CallbackQuery):
-    _, movie_id, stars = call.data.split("_")
-    movie_id, stars = int(movie_id), int(stars)
-    user = await get_user(call.from_user.id)
-    lang = user["lang"]
-
+# ── 3. EPIZOD BOSILGANDA VIDEONI YUBORISH ───────────────────────────
+@router.callback_query(F.data.startswith("play_ep_"))
+async def cb_play_selected_episode(call: CallbackQuery):
+    ep_id = int(call.data.split("_")[2])
+    
     async with get_db() as db:
-        # Foydalanuvchi reytingini saqlash (yangi jadval kerak bo'lsa ham avg hisoblaymiz)
-        await db.execute(
-            """INSERT OR REPLACE INTO user_ratings (user_id, movie_id, stars)
-               VALUES (?, ?, ?)""",
-            (call.from_user.id, movie_id, stars)
-        )
-        # O'rtacha reyting yangilash
-        async with db.execute(
-            "SELECT AVG(stars) FROM user_ratings WHERE movie_id = ?", (movie_id,)
-        ) as cur:
-            avg = (await cur.fetchone())[0] or 0
-        await db.execute(
-            "UPDATE movies SET rating = ? WHERE id = ?", (round(avg, 1), movie_id)
-        )
-        await db.commit()
-
-    msg = txt(
-        f"✅ {'⭐' * stars} Reytingiz saqlandi!",
-        f"✅ {'⭐' * stars} Ваш рейтинг сохранён!",
-        lang
-    )
-    await call.answer(msg, show_alert=True)
-    await call.message.delete()
-
-
-# ── Izohlar ────────────────────────────────────────────
-@router.callback_query(F.data.startswith("comments_"))
-async def show_comments(call: CallbackQuery):
-    movie_id = int(call.data.split("_")[1])
-    user = await get_user(call.from_user.id)
-    lang = user["lang"]
-
-    async with get_db() as db:
-        async with db.execute(
-            """SELECT c.id, c.text, c.likes, c.dislikes, u.full_name
-               FROM comments c JOIN users u ON c.user_id = u.tg_id
-               WHERE c.movie_id = ?
-               ORDER BY c.created_at DESC LIMIT 5""",
-            (movie_id,)
-        ) as cur:
-            rows = await cur.fetchall()
-
-    comments = [
-        {"id": r[0], "text": r[1], "likes": r[2], "dislikes": r[3], "name": r[4]}
-        for r in rows
-    ]
-
-    if not comments:
-        text = txt(
-            "💬 Hali izoh yo'q. Birinchi bo'ling!",
-            "💬 Пока нет комментариев. Будьте первым!",
-            lang
-        )
-    else:
-        lines = "\n\n".join([
-            f"👤 <b>{c['name']}</b>\n{c['text']}\n👍{c['likes']} 👎{c['dislikes']}"
-            for c in comments
-        ])
-        text = txt(f"💬 <b>Izohlar:</b>\n\n{lines}", f"💬 <b>Комментарии:</b>\n\n{lines}", lang)
-
-    await call.message.answer(
-        text,
-        reply_markup=comments_kb(movie_id, comments, lang),
+        async with db.execute("""
+            SELECT e.file_id, s.title_uz, e.season_number, e.episode_number 
+            FROM episodes e 
+            JOIN series s ON e.series_id = s.id 
+            WHERE e.id = ?
+        """, (ep_id,)) as cur:
+            res = await cur.fetchone()
+            
+    if not res:
+        await call.answer("❌ Video fayl topilmadi!", show_alert=True)
+        return
+        
+    file_id, title_uz, season, episode = res
+    await call.message.answer_video(
+        video=file_id,
+        caption=f"📺 <b>{title_uz}</b>\n📀 {season}-fasl | {episode}-qism",
         parse_mode="HTML"
     )
     await call.answer()
 
-@router.callback_query(F.data.startswith("addcomment_"))
-async def add_comment_start(call: CallbackQuery, state: FSMContext):
-    movie_id = int(call.data.split("_")[1])
-    user = await get_user(call.from_user.id)
-    lang = user["lang"]
-
-    # Premium tekshirish (izoh faqat premium uchun bo'lsa)
-    # if not user["is_premium"]:
-    #     await call.answer("⭐ Izoh qoldirish premium uchun!", show_alert=True)
-    #     return
-
-    await state.update_data(movie_id=movie_id)
-    await state.set_state(CommentState.waiting_text)
-    text = txt(
-        "✏️ Izohingizni yozing (max 500 belgi):",
-        "✏️ Напишите ваш комментарий (макс. 500 символов):",
-        lang
+# ── 4. SERIAL MENYUSIGA QAYTISH ─────────────────────────────────────
+@router.callback_query(F.data.startswith("back_to_series_"))
+async def cb_back_to_series_menu(call: CallbackQuery):
+    series_id = int(call.data.split("_")[3])
+    
+    async with get_db() as db:
+        async with db.execute("SELECT * FROM series WHERE id = ?", (series_id,)) as cur:
+            series = await cur.fetchone()
+        async with db.execute("SELECT season_number FROM seasons WHERE series_id = ? ORDER BY season_number", (series_id,)) as cur:
+            seasons = await cur.fetchall()
+            
+    cols = ["id", "code", "title_uz", "title_ru", "country", "year", "genres", "poster_file_id", "description", "is_premium", "status"]
+    s_dict = dict(zip(cols, series))
+    
+    kb_buttons = [[InlineKeyboardButton(text=f"📀 {r[0]}-Fasl", callback_data=f"show_season_{series_id}_{r[0]}")] for r in seasons]
+    kb = InlineKeyboardMarkup(inline_keyboard=kb_buttons)
+    
+    caption = (
+        f"📺 <b>{s_dict['title_uz']}</b> ({s_dict['year']})\n"
+        f"🎭 Janr: {s_dict['genres']}\n"
+        f"🌍 Davlat: {s_dict['country']}\n\n"
+        f"🍿 {s_dict['description']}\n\n"
+        f"👇 Faslni tanlang:"
     )
-    await call.message.answer(text)
+    await call.message.edit_caption(caption=caption, reply_markup=kb, parse_mode="HTML")
     await call.answer()
 
-@router.message(CommentState.waiting_text)
-async def save_comment(message: Message, state: FSMContext):
-    data = await state.get_data()
-    movie_id = data["movie_id"]
-    user = await get_user(message.from_user.id)
-    lang = user["lang"]
-
-    if len(message.text) > 500:
-        text = txt("❌ Izoh 500 belgidan oshmasin!", "❌ Комментарий не должен превышать 500 символов!", lang)
-        await message.answer(text)
-        return
-
-    async with get_db() as db:
-        await db.execute(
-            "INSERT INTO comments (user_id, movie_id, text) VALUES (?, ?, ?)",
-            (message.from_user.id, movie_id, message.text)
-        )
-        await db.commit()
-
-    await state.clear()
-    text = txt("✅ Izohingiz qo'shildi!", "✅ Ваш комментарий добавлен!", lang)
-    await message.answer(text, reply_markup=main_menu(lang))
-
-
-# ── Like/Dislike ───────────────────────────────────────
-@router.callback_query(F.data.startswith("like_"))
-async def like_comment(call: CallbackQuery):
-    comment_id = int(call.data.split("_")[1])
-    async with get_db() as db:
-        await db.execute(
-            "UPDATE comments SET likes = likes + 1 WHERE id = ?", (comment_id,)
-        )
-        await db.commit()
-    await call.answer("👍")
-
-@router.callback_query(F.data.startswith("dislike_"))
-async def dislike_comment(call: CallbackQuery):
-    comment_id = int(call.data.split("_")[1])
-    async with get_db() as db:
-        await db.execute(
-            "UPDATE comments SET dislikes = dislikes + 1 WHERE id = ?", (comment_id,)
-        )
-        await db.commit()
-    await call.answer("👎")
-
-
-# ── Ulashish ───────────────────────────────────────────
-@router.callback_query(F.data.startswith("share_"))
-async def share_movie(call: CallbackQuery):
-    movie_id = int(call.data.split("_")[1])
-    user = await get_user(call.from_user.id)
-    lang = user["lang"]
-
-    async with get_db() as db:
-        async with db.execute(
-            "SELECT code, title FROM movies WHERE id = ?", (movie_id,)
-        ) as cur:
-            row = await cur.fetchone()
-
-    if not row:
-        await call.answer()
-        return
-
-    bot_info = await call.bot.get_me()
-    link = f"https://t.me/{bot_info.username}?start={row[0]}"
-    text = txt(
-        f"📤 <b>{row[1]}</b> kinoni do'stlaringiz bilan ulashing:\n{link}",
-        f"📤 Поделитесь фильмом <b>{row[1]}</b> с друзьями:\n{link}",
-        lang
-    )
-    await call.message.answer(text, parse_mode="HTML")
-    await call.answer()
-
-
-# ── O'xshash kinolar ───────────────────────────────────
-@router.callback_query(F.data.startswith("similar_"))
-async def similar_movies(call: CallbackQuery):
-    movie_id = int(call.data.split("_")[1])
-    user = await get_user(call.from_user.id)
-    lang = user["lang"]
-
-    async with get_db() as db:
-        async with db.execute(
-            "SELECT genre FROM movies WHERE id = ?", (movie_id,)
-        ) as cur:
-            row = await cur.fetchone()
-
-    if not row or not row[0]:
-        await call.answer(txt("Ma'lumot yo'q", "Нет данных", lang), show_alert=True)
-        return
-
-    genre = row[0]
-    async with get_db() as db:
-        async with db.execute(
-            """SELECT code, title, rating FROM movies
-               WHERE genre = ? AND id != ? AND status = 'active'
-               ORDER BY rating DESC LIMIT 5""",
-            (genre, movie_id)
-        ) as cur:
-            rows = await cur.fetchall()
-
-    if not rows:
-        await call.answer(txt("O'xshash topilmadi", "Похожих нет", lang), show_alert=True)
-        return
-
-    lines = "\n".join([f"🎬 <code>{r[0]}</code> — {r[1]} ⭐{r[2]}" for r in rows])
-    text = txt(
-        f"🎬 <b>O'xshash kinolar ({genre}):</b>\n\n{lines}",
-        f"🎬 <b>Похожие фильмы ({genre}):</b>\n\n{lines}",
-        lang
-    )
-    await call.message.answer(text, parse_mode="HTML")
-    await call.answer()
-
-
-# ── Back to movie ──────────────────────────────────────
-@router.callback_query(F.data.startswith("back_movie_"))
-async def back_movie(call: CallbackQuery):
-    await call.message.delete()
-    await call.answer()
-
-
-# ── 🎬 Kinolar tugmasi ─────────────────────────────────────────────
-@router.message(F.text.in_(["🎬 Kinolar", "🎬 Фильмы"]))
-async def show_movies_menu(message: Message):
-    user = await get_user(message.from_user.id)
-    lang = user["lang"] if user else "uz"
-
-    async with get_db() as db:
-        # Tavsiya etilgan kinolar
-        async with db.execute(
-            "SELECT code, title, year, is_premium FROM movies WHERE status = 'active' ORDER BY views DESC LIMIT 10"
-        ) as cur:
-            rows = await cur.fetchall()
-
-    if not rows:
-        text = (
-            "🎬 <b>Kinolar</b>\n\nHozircha kinolar yo'q.\nTez kunda qo'shiladi!"
-            if lang == "uz" else
-            "🎬 <b>Фильмы</b>\n\nПока фильмов нет.\nСкоро добавим!"
-        )
-        await message.answer(text, parse_mode="HTML")
-        return
-
-    lines = []
-    for r in rows:
-        icon = "⭐" if r[3] else "🎬"
-        year = f"({r[2]})" if r[2] else ""
-        lines.append(f"{icon} <code>{r[0]}</code> — {r[1]} {year}")
-
-    header = (
-        "🎬 <b>Eng ko'p ko'rilgan kinolar</b>\n\n"
-        if lang == "uz" else
-        "🎬 <b>Самые просматриваемые фильмы</b>\n\n"
-    )
-    footer = (
-        "\n\n📌 Kino kodini yuboring yoki 🔍 Qidirish tugmasini bosing."
-        if lang == "uz" else
-        "\n\n📌 Отправьте код фильма или нажмите 🔍 Поиск."
-    )
-
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="🏆 TOP kinolar" if lang == "uz" else "🏆 ТОП фильмов",
-                callback_data="top_movies_views"
-            ),
-            InlineKeyboardButton(
-                text="⭐ Reytingli" if lang == "uz" else "⭐ По рейтингу",
-                callback_data="top_movies_rating"
-            ),
-        ]
-    ])
-
-    await message.answer(
-        header + "\n".join(lines) + footer,
-        reply_markup=kb,
-        parse_mode="HTML"
-    )
-
-
-# ── TOP kinolar callback ───────────────────────────────────────────
-@router.callback_query(F.data.in_(["top_movies_views", "top_movies_rating"]))
-async def top_movies(call: CallbackQuery):
-    user = await get_user(call.from_user.id)
-    lang = user["lang"] if user else "uz"
-    by_rating = call.data == "top_movies_rating"
-
-    order = "rating DESC" if by_rating else "views DESC"
-
-    async with get_db() as db:
-        async with db.execute(
-            f"SELECT code, title, year, is_premium, views, rating FROM movies WHERE status = 'active' ORDER BY {order} LIMIT 10"
-        ) as cur:
-            rows = await cur.fetchall()
-
-    if not rows:
-        await call.answer(
-            "Kinolar yo'q" if lang == "uz" else "Фильмов нет",
-            show_alert=True
-        )
-        return
-
-    lines = []
-    for i, r in enumerate(rows, 1):
-        icon = "⭐" if r[3] else "🎬"
-        year = f"({r[2]})" if r[2] else ""
-        stat = f"⭐{r[5]:.1f}" if by_rating else f"👁{r[4]:,}"
-        lines.append(f"{i}. {icon} <code>{r[0]}</code> — {r[1]} {year} {stat}")
-
-    header = (
-        "🏆 <b>TOP 10 — Reytingli kinolar</b>\n\n"
-        if by_rating and lang == "uz" else
-        "🏆 <b>TOP 10 — Рейтинговые фильмы</b>\n\n"
-        if by_rating else
-        "🏆 <b>TOP 10 — Ko'p ko'rilgan</b>\n\n"
-        if lang == "uz" else
-        "🏆 <b>TOP 10 — Самые просматриваемые</b>\n\n"
-    )
-
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text="👁 Ko'p ko'rilgan" if lang == "uz" else "👁 По просмотрам",
-            callback_data="top_movies_views"
-        ),
-        InlineKeyboardButton(
-            text="⭐ Reytingli" if lang == "uz" else "⭐ По рейтингу",
-            callback_data="top_movies_rating"
-        ),
-    ]])
-
-    await call.message.edit_text(
-        header + "\n".join(lines),
-        reply_markup=kb,
-        parse_mode="HTML"
-    )
-    await call.answer()
+```

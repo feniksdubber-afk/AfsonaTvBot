@@ -14,11 +14,11 @@ async def advanced_inline_search(inline_query: InlineQuery):
     bot_user = await inline_query.bot.get_me()
 
     async with get_db() as db:
-        # 1. Filmlardan qidirish (Aktivlari)
+        # 1. Filmlardan qidirish (Aktivlari) - eski title va yangi title_uz bilan solishtirib qidiramiz
         async with db.execute("""
-            SELECT code, title_uz, year, genres, poster_file_id FROM movies 
-            WHERE status = 'active' AND (title_uz LIKE ? OR title_ru LIKE ?) LIMIT 5
-        """, (f"%{query}%", f"%{query}%")) as cur:
+            SELECT code, title, title_uz, year, genres, poster_file_id FROM movies 
+            WHERE status = 'active' AND (title_uz LIKE ? OR title_ru LIKE ? OR title LIKE ?) LIMIT 5
+        """, (f"%{query}%", f"%{query}%", f"%{query}%")) as cur:
             movies = await cur.fetchall()
 
         # 2. Seriallardan qidirish (Aktivlari)
@@ -30,14 +30,17 @@ async def advanced_inline_search(inline_query: InlineQuery):
 
     # Filmlarni qo'shish
     for row in movies:
-        code, title, year, genres, poster = row
+        code, title_old, title_uz, year, genres, poster = row
+        # BACKWARD COMPATIBILITY
+        title = title_uz or title_old or "Nomsiz kino"
+        
         results.append(
             InlineQueryResultArticle(
                 id=f"movie_{code}",
-                title=f"🎬 FILM: {title} ({year})",
-                description=f"🎭 {genres}",
+                title=f"🎬 FILM: {title} ({year or '?'})",
+                description=f"🎭 {genres or ''}",
                 input_message_content=InputTextMessageContent(
-                    message_text=f"🎬 <b>{title}</b> ({year}) filmini tomosha qilish uchun pastdagi tugmani bosing 👇",
+                    message_text=f"🎬 <b>{title}</b> ({year or '?'}) filmini tomosha qilish uchun pastdagi tugmani bosing 👇",
                     parse_mode="HTML"
                 ),
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -52,10 +55,10 @@ async def advanced_inline_search(inline_query: InlineQuery):
         results.append(
             InlineQueryResultArticle(
                 id=f"series_{code}",
-                title=f"📺 SERIAL: {title} ({year})",
-                description=f"🎭 {genres}",
+                title=f"📺 SERIAL: {title} ({year or '?'})",
+                description=f"🎭 {genres or ''}",
                 input_message_content=InputTextMessageContent(
-                    message_text=f"📺 <b>{title}</b> ({year}) serialining barcha qismlarini ko'rish uchun pastdagi tugmani bosing 👇",
+                    message_text=f"📺 <b>{title}</b> ({year or '?'}) serialining barcha qismlarini ko'rish uchun pastdagi tugmani bosing 👇",
                     parse_mode="HTML"
                 ),
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -65,4 +68,3 @@ async def advanced_inline_search(inline_query: InlineQuery):
         )
 
     await inline_query.answer(results=results, cache_time=5)
-

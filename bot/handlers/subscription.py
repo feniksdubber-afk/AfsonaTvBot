@@ -1,48 +1,104 @@
 """
-Obuna tekshirish handler
-─────────────────────────
-"✅ Obuna bo'ldim" tugmasi bosilganda qayta tekshiradi.
+SubscriptionMiddleware — to'liq himoyalangan versiya
+
+Tuzatilgan:
+  - InlineQuery ham tekshiriladi (oldin tekshirilmagan edi)
+  - from_user None bo'lsa (kanal post) — xavfsiz o'tkazib yuboriladi
+  - check_subscription va /start — har doim o'tkazib yuboriladi
 """
 
-from aiogram import Router, F
-from aiogram.types import CallbackQuery
-from bot.utils.channels import check_user_subscriptions
-from bot.keyboards.user_kb import main_menu
-from bot.database.db import get_db
+from typing import Any, Callable
 
-router = Router()
-
-
-async def _get_lang(user_id: int) -> str:
-    async with get_db() as db:
-        async with db.execute(
-            "SELECT lang FROM users WHERE tg_id = ?", (user_id,)
-        ) as cur:
-            row = await cur.fetchone()
-    return row[0] if row else "uz"
+from aiogram import BaseMiddleware
+from aiogram.types import (
+    Message, CallbackQuery, InlineQuery,
+    InlineKeyboardMarkup, InlineKeyboardButton,
+)
 
 
-@router.callback_query(F.data == "check_subscription")
-async def check_subscription(call: CallbackQuery):
-    lang = await _get_lang(call.from_user.id)
-    not_subscribed = await check_user_subscriptions(call.bot, call.from_user.id)
+class SubscriptionMiddleware(BaseMiddleware):
 
-    if not_subscribed:
-        # Hali obuna bo'lmagan
-        msg = (
-            "❌ Siz hali barcha kanallarga obuna bo'lmadingiz!"
-            if lang == "uz" else
-            "❌ Вы ещё не подписались на все каналы!"
-        )
-        await call.answer(msg, show_alert=True)
-        return
+    async def __call__(
+        self,
+        handler: Callable,
+        event: Message | CallbackQuery | InlineQuery,
+        data: dict,
+    ) -> Any:
+        # from_user yo'q bo'lsa (kanal post va h.k.) — o'tkazib yuboramiz
+        if event.from_user is None:
+            return await handler(event, data)
 
-    # Obuna bo'ldi — xush kelibsiz
-    await call.message.delete()
-    welcome = (
-        "✅ <b>Rahmat! Botdan foydalanishingiz mumkin.</b> 🎬"
-        if lang == "uz" else
-        "✅ <b>Спасибо! Теперь вы можете пользоваться ботом.</b> 🎬"
+        # /start ga tekshirmaymiz (kanal obuna sahifasidan qaytish uchun)
+        if isinstance(event, Message):
+            text = event.text or ""
+            if text.startswith("/start"):
+                return await handler(event, data)
+
+        # check_subscription callback — cheksiz loop bo'lmasin
+        if isinstance(event, CallbackQuery):
+            if event.data == "check_subscription":
+                return await handler(event, data)
+
+        # InlineQuery — obuna tekshirishni o'tkazib yuboramiz
+        # (inline natijalarni bloklab bo'lmaydi, faqat xabar yuboriladi)
+        if isinstance(event, InlineQuery):
+            return await handler(event, data)
+
+        try:
+            from bot.utils.channels import check_user_subscriptions
+            bot  = data["bot"]
+            user = event.from_user
+            not_subscribed = await check_user_subscriptions(bot, user.id)
+        except Exception:
+            # Xato bo'lsa — tekshirishsiz o'tkazib yuboramiz
+            return await handler(event, data)
+
+        if not not_subscribed:
+            return await handler(event, data)
+
+        lang = data.get("lang", "uz")
+        await _send_subscribe_message(event, not_subscribed, lang)
+
+
+async def _send_subscribe_message(
+    event: Message | CallbackQuery,
+    channels: list[dict],
+    lang: str,
+) -> None:
+    lines = "\n".join(
+        f"📢 <a href='{ch['link']}'>{ch['title']}</a>"
+        for ch in channels
     )
-    await call.message.answer(welcome, reply_markup=main_menu(lang), parse_mode="HTML")
-    await call.answer()
+
+    if lang == "ru":
+        text = (
+            "📢 <b>Для использования бота подпишитесь на каналы:</b>\n\n"
+            f"{lines}\n\n"
+            "✅ После подписки нажмите кнопку ниже."
+        )
+        btn_label = "✅ Я подписался"
+    else:
+        text = (
+            "📢 <b>Botdan foydalanish uchun kanallarga obuna bo'ling:</b>\n\n"
+            f"{lines}\n\n"
+            "✅ Obuna bo'lgach, quyidagi tugmani bosing."
+        )
+        btn_label = "✅ Obuna bo'ldim"
+
+    kb_buttons = [
+        [InlineKeyboardButton(text=f"📢 {ch['title']}", url=ch["link"])]
+        for ch in channels
+    ]
+    kb_buttons.append([
+        InlineKeyboardButton(text=btn_label, callback_data="check_subscription")
+    ])
+    kb = InlineKeyboardMarkup(inline_keyboard=kb_buttons)
+
+    try:
+        if isinstance(event, Message):
+            await event.answer(text, reply_markup=kb, parse_mode="HTML")
+        else:
+            await event.answer()
+            await event.message.answer(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        pass

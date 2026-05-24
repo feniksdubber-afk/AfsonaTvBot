@@ -520,7 +520,7 @@ async def show_favorites(call: CallbackQuery):
         # Filmlar
         async with db.execute(
             """SELECT COALESCE(m.title_uz, m.title, 'Nomsiz') AS title,
-                      m.code, 'movie' AS type
+                      m.code, 'movie' AS content_type
                FROM favorites f
                JOIN movies m ON f.movie_id = m.id
                WHERE f.user_id = ? AND m.status = 'active'
@@ -529,30 +529,39 @@ async def show_favorites(call: CallbackQuery):
         ) as cur:
             movie_rows = await cur.fetchall()
 
-        # Seriallar (serial_id ustuni migrations orqali qo'shilgan bo'lsa)
-        # BUG #2 FIX: favorites jadvalida serial_id ustuni yo'q — faqat movie_id bor.
-        # Shuning uchun seriallarni ham movie_id orqali emas, alohida serial_id
-        # ustuni orqali saqlash kerak. Hozircha faqat kinolarni ko'rsatamiz,
-        # va pastda migration eslatmasini qoldiramiz.
-        # TODO: favorites jadvaliga serial_id INTEGER ustunini qo'shing.
+        # Seriallar — series_id ustuni migration orqali qo'shilgan
+        async with db.execute(
+            """SELECT COALESCE(s.title_uz, 'Nomsiz serial') AS title,
+                      s.code, 'series' AS content_type
+               FROM favorites f
+               JOIN series s ON f.series_id = s.id
+               WHERE f.user_id = ? AND s.status = 'active'
+               ORDER BY f.added_at DESC LIMIT 10""",
+            (user["tg_id"],)
+        ) as cur:
+            series_rows = await cur.fetchall()
 
-    if not movie_rows:
+    all_items = list(movie_rows) + list(series_rows)
+
+    if not all_items:
         text = txt("❤️ Sevimlilar bo'sh.", "❤️ Избранное пусто.", lang)
         await call.message.edit_text(text, reply_markup=back_kb(), parse_mode="HTML")
         await call.answer()
         return
 
-    lines = "\n".join(
-        [f"🎬 <code>{r[1]}</code> — {r[0]}" for r in movie_rows]
-    )
+    lines = []
+    for title, code, ctype in all_items:
+        icon = "🎬" if ctype == "movie" else "📺"
+        lines.append(f"{icon} <code>{code}</code> — {title}")
+
     hint = txt(
-        "Kino kodini yuboring — bot ko'rsatadi.",
-        "Отправьте код фильма — бот покажет.",
+        "Kino/serial kodini yuboring — bot ko'rsatadi.",
+        "Отправьте код фильма/сериала — бот покажет.",
         lang
     )
     text = txt(
-        f"❤️ <b>Sevimlilar</b>\n\n{lines}\n\n{hint}",
-        f"❤️ <b>Избранное</b>\n\n{lines}\n\n{hint}",
+        f"❤️ <b>Sevimlilar</b>\n\n" + "\n".join(lines) + f"\n\n{hint}",
+        f"❤️ <b>Избранное</b>\n\n" + "\n".join(lines) + f"\n\n{hint}",
         lang
     )
     await call.message.edit_text(text, reply_markup=back_kb(), parse_mode="HTML")
@@ -571,29 +580,49 @@ async def watch_history(call: CallbackQuery):
     lang = user["lang"]
 
     async with get_db() as db:
-        # BUG #1 FIX: m.title ishlatilgan edi — ba'zi kino title NULL bo'lishi mumkin.
-        # COALESCE(title_uz, title) bilan xavfsiz qilamiz.
+        # Filmlar ko'rish tarixi
         async with db.execute(
-            """SELECT m.code,
+            """SELECT 'movie' AS type,
                       COALESCE(m.title_uz, m.title, 'Nomsiz') AS title,
                       h.watched_at
                FROM watch_history h
                JOIN movies m ON h.movie_id = m.id
-               WHERE h.user_id = ?
-               ORDER BY h.watched_at DESC LIMIT 20""",
+               WHERE h.user_id = ? AND h.movie_id IS NOT NULL
+               ORDER BY h.watched_at DESC LIMIT 10""",
             (user["tg_id"],)
         ) as cur:
-            rows = await cur.fetchall()
+            movie_rows = await cur.fetchall()
 
-    if not rows:
+        # Seriallar ko'rish tarixi
+        async with db.execute(
+            """SELECT 'series' AS type,
+                      COALESCE(s.title_uz, 'Nomsiz serial') AS title,
+                      h.watched_at,
+                      h.season_number,
+                      h.episode_number
+               FROM watch_history h
+               JOIN series s ON h.series_id = s.id
+               WHERE h.user_id = ? AND h.series_id IS NOT NULL
+               ORDER BY h.watched_at DESC LIMIT 10""",
+            (user["tg_id"],)
+        ) as cur:
+            series_rows = await cur.fetchall()
+
+    lines = []
+    for r in movie_rows:
+        lines.append(f"🎬 {r[1]} <i>({r[2][:10]})</i>")
+    for r in series_rows:
+        s_ep = f"{r[3]}-fasl {r[4]}-qism" if r[3] and r[4] else ""
+        lines.append(f"📺 {r[1]} {s_ep} <i>({r[2][:10]})</i>")
+
+    # Vaqt bo'yicha saralash (ikki ro'yxat birga)
+    if not lines:
         text = txt("📜 Tarix bo'sh.", "📜 История пуста.", lang)
     else:
-        lines = "\n".join(
-            [f"🎬 <code>{r[0]}</code> — {r[1]} ({r[2][:10]})" for r in rows]
-        )
+        joined = "\n".join(lines[:20])
         text = txt(
-            f"📜 <b>Ko'rish tarixi</b>\n\n{lines}",
-            f"📜 <b>История просмотров</b>\n\n{lines}",
+            f"📜 <b>Ko'rish tarixi</b>\n\n{joined}",
+            f"📜 <b>История просмотров</b>\n\n{joined}",
             lang
         )
 

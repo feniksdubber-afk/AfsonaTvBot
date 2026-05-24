@@ -1,6 +1,5 @@
 import csv
 import io
-import random
 import asyncio
 from datetime import datetime, timedelta
 
@@ -22,6 +21,7 @@ from bot.keyboards.admin_kb import (
 )
 from bot.keyboards import admin_kb as custom_admin_kb
 from bot.keyboards.user_kb import main_menu
+from bot.utils.admin_tools import generate_unique_code
 
 router = Router()
 
@@ -62,23 +62,6 @@ class MsgUserState(StatesGroup):
 class GivePremiumState(StatesGroup):
     waiting = State()
     target  = State()
-
-
-# ── UTILS: KOD GENERATORI ──────────────────────────────────────────────
-# BUG #5 FIX: admin_tools.py dan import qilinmagan edi, hozir ham lokal
-# saqlaymiz, lekin admin_tools.py dagi nusxasini ham ushbu funksiyaga
-# yo'naltiramiz (ikkala joyda bir xil mantiq, bu fayl lokal versiyasini
-# ishlatadi).
-async def generate_unique_code(db) -> str:
-    """Kino yoki serial uchun unikal 3-4 xonali raqamli kod yaratadi."""
-    while True:
-        code = str(random.randint(100, 9999))
-        async with db.execute("SELECT id FROM movies WHERE code = ?", (code,)) as cur:
-            movie = await cur.fetchone()
-        async with db.execute("SELECT id FROM series WHERE code = ?", (code,)) as cur:
-            series = await cur.fetchone()
-        if not movie and not series:
-            return code
 
 
 # ── /admin BUYRUG'I ────────────────────────────────────────────────────

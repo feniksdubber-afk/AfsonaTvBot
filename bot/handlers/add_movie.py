@@ -72,10 +72,10 @@ async def _ensure_unique_code(db, code: str) -> str:
     """
     Kod bazada mavjud bo'lsa, oxiriga raqam qo'shib unikal qiladi.
     Ikki jadvalda (movies va series) ham tekshiradi.
+    Maksimal 50 ta urinish — cheksiz loop yo'q.
     """
     original = code
-    attempt = 0
-    while True:
+    for attempt in range(1, 51):
         async with db.execute(
             "SELECT 1 FROM movies WHERE code = ?", (code,)
         ) as cur:
@@ -88,11 +88,14 @@ async def _ensure_unique_code(db, code: str) -> str:
         if not movie_exists and not series_exists:
             return code
 
-        attempt += 1
-        code = original + str(random.randint(1, 99))
-        if attempt > 20:
-            # Juda ko'p urinish — tasodifiy kod
-            code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        if attempt <= 20:
+            code = original + str(random.randint(1, 99))
+        else:
+            # Ko'p urinishda to'liq tasodifiy kod
+            code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+
+    # Bu holatga amalda tushib bo'lmaydi
+    raise ValueError(f"_ensure_unique_code: unikal kod topilmadi (asl: {original})")
 
 
 def _parse_caption(caption: str) -> dict:

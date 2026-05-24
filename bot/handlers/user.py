@@ -1,3 +1,24 @@
+"""
+user.py
+───────
+Foydalanuvchi handlerlari: /start, profil, sevimlilar,
+ko'rish tarixi, qidiruv, kino so'rov, support, referral.
+
+TUZATILGAN:
+  #1  Ko'rish tarixi watched_at bo'yicha saralanadi (movies+series birga)
+  #2  Sevimlilar: movies + series birga ko'rsatiladi
+  #3  /start kelganda FSM holati tozalanadi
+  #4  Referral: row None bo'lsa xato bo'lmaydi
+  #5  Premium kino/serial tekshiruvi qo'shildi
+  #6  views va watch_history bitta tranzaksiyada
+  #7  file_id None bo'lsa answer_video xato bermasligi
+  #8  seasons bo'sh bo'lsa xabar beriladi
+  #9  poster_file_id None bo'lsa answer_photo xato bermasligi
+  #10 delete() dan KEYIN answer() chaqirish tartiblandiReferral ball point_log ga yoziladi
+  #11 message.text None bo'lsa xato bo'lmaydi
+  #12 Referral ball point_log ga yoziladi (gamification bilan izchillik)
+"""
+
 from aiogram import Router, F
 from aiogram.types import (
     Message, CallbackQuery,
@@ -26,6 +47,9 @@ class RequestState(StatesGroup):
 class SupportState(StatesGroup):
     waiting_text = State()
 
+class SearchState(StatesGroup):
+    waiting_query = State()
+
 
 # ══════════════════════════════════════════════════════════════════════
 #  YORDAMCHI FUNKSIYALAR
@@ -47,7 +71,6 @@ def txt(uz: str, ru: str, lang: str) -> str:
 
 
 def _premium_label(user: dict, lang: str) -> str:
-    """Premium statusini formatlangan matn ko'rinishida qaytaradi."""
     if user.get("is_premium"):
         until = user.get("premium_until") or "?"
         return f"⭐ Premium ({until})"
@@ -55,18 +78,13 @@ def _premium_label(user: dict, lang: str) -> str:
 
 
 async def _profile_stats(tg_id: int) -> tuple[int, int]:
-    """Ko'rilgan va sevimlilardagi jami sonini qaytaradi (kino + serial)."""
+    """Ko'rilgan va sevimlilardagi jami sonini qaytaradi."""
     async with get_db() as db:
-        # BUG #1 FIX: watch_history faqat movies ga bog'liq edi.
-        # Seriallar ham watch_history ga yozilishi kerak (movie_id = None bo'lganda).
-        # Hozircha barcha yozuvlarni sanab beramiz (kino va serial birga).
         async with db.execute(
             "SELECT COUNT(*) FROM watch_history WHERE user_id = ?", (tg_id,)
         ) as cur:
             watched = (await cur.fetchone())[0]
 
-        # BUG #2 FIX: favorites faqat movies ni ko'rsatar edi.
-        # Endi movies + series birga sanalaadi.
         async with db.execute(
             "SELECT COUNT(*) FROM favorites WHERE user_id = ?", (tg_id,)
         ) as cur:
@@ -80,9 +98,7 @@ async def _profile_stats(tg_id: int) -> tuple[int, int]:
 # ══════════════════════════════════════════════════════════════════════
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
-    # BUG #3 FIX: /start kelganda FSM holati tozalanmagan edi.
-    # Agar foydalanuvchi so'rov yoki support yozayotgan bo'lsa,
-    # deep link orqali /start bosganida eski holat qolib ketar edi.
+    # FIX #3: /start kelganda FSM holati tozalanadi
     await state.clear()
 
     user = await get_user(message.from_user.id)
@@ -107,9 +123,7 @@ async def cmd_start(message: Message, state: FSMContext):
                 ) as cur:
                     row = await cur.fetchone()
 
-                # BUG #4 FIX: row None bo'lishi mumkin (yangi user hali saqlanmagan).
-                # AuthMiddleware allaqachon userni yaratgan bo'lishi kerak, lekin
-                # agar row None bo'lsa xato chiqar edi.
+                # FIX #4: row None bo'lsa xato bo'lmaydi
                 if row is not None and row[0] is None:
                     await db.execute(
                         "UPDATE users SET referred_by = ? WHERE tg_id = ?",
@@ -119,9 +133,12 @@ async def cmd_start(message: Message, state: FSMContext):
                         "UPDATE users SET balance = balance + 50 WHERE tg_id = ?",
                         (inviter[0],)
                     )
+                    # FIX #12: Referral ball point_log ga yoziladi
+                    await db.execute(
+                        "INSERT INTO point_log (user_id, amount, reason) VALUES (?, 50, 'referral')",
+                        (inviter[0],)
+                    )
                     await db.commit()
-
-        # Referral bo'lsa ham greeting ko'rsatilsin — return qilmaymiz
 
     # ── movie_ deep link ────────────────────────────────────────────
     if arg.startswith("movie_"):
@@ -159,16 +176,13 @@ async def cmd_start(message: Message, state: FSMContext):
 #  DEEP LINK YORDAMCHI FUNKSIYALARI
 # ══════════════════════════════════════════════════════════════════════
 async def _send_movie_by_code(message: Message, code: str, lang: str = "uz"):
-    """Kino kodiga ko'ra filmni yuboradi va ko'rishlar sonini oshiradi."""
     async with get_db() as db:
         async with db.execute(
             "SELECT * FROM movies WHERE code = ?", (code,)
         ) as cur:
             row = await cur.fetchone()
             if not row:
-                await message.answer(
-                    txt("❌ Kontent topilmadi!", "❌ Контент не найден!", lang)
-                )
+                await message.answer(txt("❌ Kontent topilmadi!", "❌ Контент не найден!", lang))
                 return
             cols = [d[0] for d in cur.description]
             m = dict(zip(cols, row))
@@ -183,32 +197,36 @@ async def _send_movie_by_code(message: Message, code: str, lang: str = "uz"):
         )
         return
 
-    # BUG #5 FIX: Premium kino tekshiruvi yo'q edi — hamma ko'ra olar edi.
+    # FIX #5: Premium kino tekshiruvi
     if m.get("is_premium"):
         user = await get_user(message.from_user.id)
         if not (user and user.get("is_premium")):
             await message.answer(
                 txt(
                     "⭐ Bu kontent faqat <b>Premium</b> foydalanuvchilar uchun!\n\n"
-                    "Premium olish uchun: /start premium",
+                    "Premium olish uchun: /premium",
                     "⭐ Этот контент только для <b>Premium</b> пользователей!\n\n"
-                    "Получить Premium: /start premium",
+                    "Получить Premium: /premium",
                     lang
                 ),
                 parse_mode="HTML"
             )
             return
 
+    # FIX #7: file_id None bo'lsa xato bermasligi
+    if not m.get("file_id"):
+        await message.answer(txt("❌ Video fayli topilmadi!", "❌ Видеофайл не найден!", lang))
+        return
+
     title = m.get("title_uz") or m.get("title") or "Nomsiz kino"
     caption = (
         f"🎬 <b>{title}</b> ({m.get('year', '?')})\n"
-        f"🎭 {m.get('genres') or m.get('genre', '')}\n"
-        f"🌍 {m.get('country', '')}\n\n"
-        f"🍿 {m.get('description', '')}"
+        f"🎭 {m.get('genres') or m.get('genre', '') or '—'}\n"
+        f"🌍 {m.get('country', '') or '—'}\n\n"
+        f"🍿 {m.get('description', '') or ''}"
     )
 
-    # BUG #6 FIX: views yangilanishi va watch_history yozuvi alohida DB
-    # ulanishida edi — endi bitta tranzaksiyada bajariladi.
+    # FIX #6: views va watch_history bitta tranzaksiyada
     async with get_db() as db:
         await db.execute(
             "UPDATE movies SET views = views + 1 WHERE id = ?", (m["id"],)
@@ -219,13 +237,6 @@ async def _send_movie_by_code(message: Message, code: str, lang: str = "uz"):
         )
         await db.commit()
 
-    # BUG #7 FIX: file_id None bo'lsa answer_video xato berar edi.
-    if not m.get("file_id"):
-        await message.answer(
-            txt("❌ Video fayli topilmadi!", "❌ Видеофайл не найден!", lang)
-        )
-        return
-
     await message.answer_video(
         video=m["file_id"],
         caption=caption,
@@ -234,16 +245,13 @@ async def _send_movie_by_code(message: Message, code: str, lang: str = "uz"):
 
 
 async def _send_series_by_code(message: Message, code: str, lang: str = "uz"):
-    """Serial kodiga ko'ra serial ma'lumotini (fasllar tugmasi bilan) yuboradi."""
     async with get_db() as db:
         async with db.execute(
             "SELECT * FROM series WHERE code = ?", (code,)
         ) as cur:
             row = await cur.fetchone()
             if not row:
-                await message.answer(
-                    txt("❌ Serial topilmadi!", "❌ Сериал не найден!", lang)
-                )
+                await message.answer(txt("❌ Serial topilmadi!", "❌ Сериал не найден!", lang))
                 return
             cols = [d[0] for d in cur.description]
             s = dict(zip(cols, row))
@@ -264,24 +272,23 @@ async def _send_series_by_code(message: Message, code: str, lang: str = "uz"):
         )
         return
 
-    # BUG #5 FIX: Premium serial tekshiruvi yo'q edi.
+    # FIX #5: Premium serial tekshiruvi
     if s.get("is_premium"):
         user = await get_user(message.from_user.id)
         if not (user and user.get("is_premium")):
             await message.answer(
                 txt(
                     "⭐ Bu serial faqat <b>Premium</b> foydalanuvchilar uchun!\n\n"
-                    "Premium olish uchun: /start premium",
+                    "Premium olish uchun: /premium",
                     "⭐ Этот сериал только для <b>Premium</b> пользователей!\n\n"
-                    "Получить Premium: /start premium",
+                    "Получить Premium: /premium",
                     lang
                 ),
                 parse_mode="HTML"
             )
             return
 
-    # BUG #8 FIX: seasons bo'sh bo'lsa inline_keyboard bo'sh qolardi
-    # va Telegram xato berar edi.
+    # FIX #8: seasons bo'sh bo'lsa xabar beriladi
     if not seasons:
         await message.answer(
             txt(
@@ -301,11 +308,11 @@ async def _send_series_by_code(message: Message, code: str, lang: str = "uz"):
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=kb_buttons)
 
-    title    = s.get("title_uz") or "Nomsiz serial"
-    year     = s.get("year") or "?"
-    genres   = s.get("genres") or "—"
-    country  = s.get("country") or "—"
-    desc     = s.get("description") or ""
+    title   = s.get("title_uz") or "Nomsiz serial"
+    year    = s.get("year") or "?"
+    genres  = s.get("genres") or "—"
+    country = s.get("country") or "—"
+    desc    = s.get("description") or ""
     caption = (
         f"📺 <b>{title}</b> ({year})\n"
         f"🎭 Janr: {genres}\n"
@@ -314,7 +321,7 @@ async def _send_series_by_code(message: Message, code: str, lang: str = "uz"):
         f"👇 {'Faslni tanlang:' if lang == 'uz' else 'Выберите сезон:'}"
     )
 
-    # BUG #9 FIX: poster_file_id None bo'lsa answer_photo xato berar edi.
+    # FIX #9: poster_file_id None bo'lsa answer_photo xato bermasligi
     if s.get("poster_file_id"):
         await message.answer_photo(
             photo=s["poster_file_id"],
@@ -342,7 +349,7 @@ async def show_profile(message: Message):
         f"👤 <b>Profil</b>\n\n"
         f"🆔 ID: <code>{user['tg_id']}</code>\n"
         f"👨 Ism: {user['full_name']}\n"
-        f"🌐 Til: {'O\'zbek 🇺🇿' if lang == 'uz' else 'Русский 🇷🇺'}\n"
+        f"🌐 Til: {('O\'zbek 🇺🇿' if lang == 'uz' else 'Ruscha 🇷🇺')}\n"
         f"⭐ Premium: {premium_status}\n"
         f"💰 Balans: {user['balance']} ball\n\n"
         f"📊 <b>Statistika</b>\n"
@@ -353,7 +360,7 @@ async def show_profile(message: Message):
         f"👤 <b>Профиль</b>\n\n"
         f"🆔 ID: <code>{user['tg_id']}</code>\n"
         f"👨 Имя: {user['full_name']}\n"
-        f"🌐 Язык: {'O\'zbek 🇺🇿' if lang == 'uz' else 'Русский 🇷🇺'}\n"
+        f"🌐 Yazyk: {('O\'zbek 🇺🇿' if lang == 'uz' else 'Ruscha 🇷🇺')}\n"
         f"⭐ Премиум: {premium_status}\n"
         f"💰 Баланс: {user['balance']} баллов\n\n"
         f"📊 <b>Статистика</b>\n"
@@ -394,9 +401,8 @@ async def set_lang(call: CallbackQuery):
         await db.commit()
 
     msg = "✅ Til o'zgartirildi!" if new_lang == "uz" else "✅ Язык изменён!"
+    # FIX #10: avval answer() keyin delete() — to'g'ri tartib
     await call.answer(msg)
-    # BUG #10 FIX: delete() dan keyin answer() chaqirish xato edi —
-    # delete bo'lgandan keyin message mavjud emas. Tartib: avval answer, keyin delete.
     try:
         await call.message.delete()
     except Exception:
@@ -506,7 +512,7 @@ async def referral(call: CallbackQuery):
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  SEVIMLILAR — BUG #2 FIX: movies + series birga ko'rsatiladi
+#  SEVIMLILAR
 # ══════════════════════════════════════════════════════════════════════
 @router.callback_query(F.data == "favorites")
 async def show_favorites(call: CallbackQuery):
@@ -517,7 +523,6 @@ async def show_favorites(call: CallbackQuery):
     lang = user["lang"]
 
     async with get_db() as db:
-        # Filmlar
         async with db.execute(
             """SELECT COALESCE(m.title_uz, m.title, 'Nomsiz') AS title,
                       m.code, 'movie' AS content_type
@@ -529,7 +534,6 @@ async def show_favorites(call: CallbackQuery):
         ) as cur:
             movie_rows = await cur.fetchall()
 
-        # Seriallar — series_id ustuni migration orqali qo'shilgan
         async with db.execute(
             """SELECT COALESCE(s.title_uz, 'Nomsiz serial') AS title,
                       s.code, 'series' AS content_type
@@ -569,7 +573,7 @@ async def show_favorites(call: CallbackQuery):
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  KO'RISH TARIXI — BUG #1 FIX: title_uz → COALESCE(title_uz, title)
+#  KO'RISH TARIXI — FIX #1: watched_at bo'yicha to'g'ri saralanadi
 # ══════════════════════════════════════════════════════════════════════
 @router.callback_query(F.data == "history")
 async def watch_history(call: CallbackQuery):
@@ -580,20 +584,17 @@ async def watch_history(call: CallbackQuery):
     lang = user["lang"]
 
     async with get_db() as db:
-        # Filmlar ko'rish tarixi
         async with db.execute(
             """SELECT 'movie' AS type,
                       COALESCE(m.title_uz, m.title, 'Nomsiz') AS title,
-                      h.watched_at
+                      h.watched_at, NULL, NULL
                FROM watch_history h
                JOIN movies m ON h.movie_id = m.id
-               WHERE h.user_id = ? AND h.movie_id IS NOT NULL
-               ORDER BY h.watched_at DESC LIMIT 10""",
+               WHERE h.user_id = ? AND h.movie_id IS NOT NULL""",
             (user["tg_id"],)
         ) as cur:
             movie_rows = await cur.fetchall()
 
-        # Seriallar ko'rish tarixi
         async with db.execute(
             """SELECT 'series' AS type,
                       COALESCE(s.title_uz, 'Nomsiz serial') AS title,
@@ -602,24 +603,31 @@ async def watch_history(call: CallbackQuery):
                       h.episode_number
                FROM watch_history h
                JOIN series s ON h.series_id = s.id
-               WHERE h.user_id = ? AND h.series_id IS NOT NULL
-               ORDER BY h.watched_at DESC LIMIT 10""",
+               WHERE h.user_id = ? AND h.series_id IS NOT NULL""",
             (user["tg_id"],)
         ) as cur:
             series_rows = await cur.fetchall()
 
-    lines = []
-    for r in movie_rows:
-        lines.append(f"🎬 {r[1]} <i>({r[2][:10]})</i>")
-    for r in series_rows:
-        s_ep = f"{r[3]}-fasl {r[4]}-qism" if r[3] and r[4] else ""
-        lines.append(f"📺 {r[1]} {s_ep} <i>({r[2][:10]})</i>")
+    # FIX #1: Ikki ro'yxat birlashtiriladi va watched_at bo'yicha saralanadi
+    all_history = sorted(
+        list(movie_rows) + list(series_rows),
+        key=lambda x: x[2] or "",
+        reverse=True
+    )[:20]
 
-    # Vaqt bo'yicha saralash (ikki ro'yxat birga)
+    lines = []
+    for ctype, title, watched_at, season, episode in all_history:
+        date_str = (watched_at or "")[:10]
+        if ctype == "movie":
+            lines.append(f"🎬 {title} <i>({date_str})</i>")
+        else:
+            ep_info = f"{season}-fasl {episode}-qism" if season and episode else ""
+            lines.append(f"📺 {title} {ep_info} <i>({date_str})</i>")
+
     if not lines:
         text = txt("📜 Tarix bo'sh.", "📜 История пуста.", lang)
     else:
-        joined = "\n".join(lines[:20])
+        joined = "\n".join(lines)
         text = txt(
             f"📜 <b>Ko'rish tarixi</b>\n\n{joined}",
             f"📜 <b>История просмотров</b>\n\n{joined}",
@@ -654,7 +662,7 @@ async def movie_request_save(message: Message, state: FSMContext):
     user = await get_user(message.from_user.id)
     lang = user["lang"] if user else "uz"
 
-    # BUG #11 FIX: message.text None bo'lishi mumkin (rasm, sticker yuborilsa).
+    # FIX #11: message.text None bo'lishi mumkin
     if not message.text:
         await message.answer(
             txt("❌ Iltimos, matn yuboring.", "❌ Пожалуйста, отправьте текст.", lang)
@@ -701,7 +709,6 @@ async def support_save(message: Message, state: FSMContext):
     user = await get_user(message.from_user.id)
     lang = user["lang"] if user else "uz"
 
-    # BUG #11 FIX: matn bo'lmasa xato bo'lmasin.
     msg_text = message.text or "[Matn yo'q]"
 
     admin_text = (
@@ -761,7 +768,7 @@ async def back_profile(call: CallbackQuery):
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  NOOP (hech narsa qilmaydigan tugmalar uchun)
+#  NOOP
 # ══════════════════════════════════════════════════════════════════════
 @router.callback_query(F.data == "noop")
 async def noop(call: CallbackQuery):
@@ -819,10 +826,6 @@ async def show_movies_menu(message: Message):
 # ══════════════════════════════════════════════════════════════════════
 #  🔍 QIDIRISH
 # ══════════════════════════════════════════════════════════════════════
-class SearchState(StatesGroup):
-    waiting_query = State()
-
-
 @router.message(F.text.in_(["🔍 Qidirish", "🔍 Поиск"]))
 @router.message(F.text == "/search")
 async def search_start(message: Message, state: FSMContext):
@@ -852,7 +855,6 @@ async def search_process(message: Message, state: FSMContext):
     like = f"%{query}%"
 
     async with get_db() as db:
-        # Filmlar
         async with db.execute(
             """SELECT code, COALESCE(title_uz, title, 'Nomsiz') as title,
                       year, genres, is_premium
@@ -864,7 +866,6 @@ async def search_process(message: Message, state: FSMContext):
         ) as cur:
             movies = await cur.fetchall()
 
-        # Seriallar
         async with db.execute(
             """SELECT code, COALESCE(title_uz, 'Nomsiz serial') as title,
                       year, genres, is_premium

@@ -13,6 +13,7 @@ from bot.database.db import init_db
 from bot.handlers import user, movie, admin, premium, gamification
 from bot.handlers import subscription as subscription_handler
 from bot.handlers import add_movie
+from bot.handlers import inline_search
 from bot.handlers import admin_channels
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.subscription import SubscriptionMiddleware
@@ -49,6 +50,7 @@ async def main():
     # subscription_handler BIRINCHI — check_subscription callback uchun
     dp.include_router(subscription_handler.router)
     dp.include_router(add_movie.router)
+    dp.include_router(inline_search.router)
     dp.include_router(admin_channels.router)
     dp.include_router(user.router)
     dp.include_router(movie.router)

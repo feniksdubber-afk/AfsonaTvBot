@@ -142,5 +142,3 @@ async def cancel_fsm_process(call: CallbackQuery, state: FSMContext):
     await state.clear()
     await call.message.edit_text("❌ Jarayon bekor qilindi.")
     await call.answer()
-
-```

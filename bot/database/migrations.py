@@ -6,6 +6,7 @@ Ma'lumotlar saqlanib qoladi.
 Har safar bot ishga tushganda chaqiriladi — xavfsiz (IF NOT EXISTS).
 """
 
+import json
 import aiosqlite
 from bot.config import DB_PATH
 
@@ -27,7 +28,7 @@ async def run_migrations():
             VALUES ('required_channels', '[]')
         """)
 
-        # ── 2. error_logs jadvali (agar yo'q bo'lsa) ─────────────────
+        # ── 2. error_logs jadvali ─────────────────────────────────────
         await db.execute("""
             CREATE TABLE IF NOT EXISTS error_logs (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,7 +38,7 @@ async def run_migrations():
             )
         """)
 
-        # ── 3. point_log jadvali (agar yo'q bo'lsa) ──────────────────
+        # ── 3. point_log jadvali ──────────────────────────────────────
         await db.execute("""
             CREATE TABLE IF NOT EXISTS point_log (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -77,7 +78,7 @@ async def run_migrations():
             )
         """)
 
-        # ── 6. tasks jadvali (agar yo'q bo'lsa) ──────────────────────
+        # ── 6. tasks jadvali ──────────────────────────────────────────
         await db.execute("""
             CREATE TABLE IF NOT EXISTS tasks (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,34 +102,75 @@ async def run_migrations():
             )
         """)
 
-        # ── 8. users jadvaliga yangi ustunlar qo'shish ────────────────
-        # (agar mavjud bo'lmasa)
-        new_columns = [
+        # ── 8. YANGI: series jadvali (Seriallar uchun) ────────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS series (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                code            TEXT UNIQUE NOT NULL,
+                title_uz        TEXT NOT NULL,
+                title_ru        TEXT,
+                country         TEXT,
+                year            INTEGER,
+                genres          TEXT,
+                poster_file_id  TEXT,
+                description     TEXT,
+                is_premium      INTEGER DEFAULT 0,
+                status          TEXT DEFAULT 'active', -- active, archived, deleted
+                created_at      TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
+        # ── 9. YANGI: seasons jadvali (Fasllar) ───────────────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS seasons (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                series_id     INTEGER NOT NULL,
+                season_number INTEGER NOT NULL,
+                UNIQUE(series_id, season_number),
+                FOREIGN KEY (series_id) REFERENCES series(id) ON DELETE CASCADE
+            )
+        """)
+
+        # ── 10. YANGI: episodes jadvali (Qismlar) ─────────────────────
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS episodes (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                series_id      INTEGER NOT NULL,
+                season_number  INTEGER NOT NULL,
+                episode_number INTEGER NOT NULL,
+                file_id        TEXT NOT NULL,
+                created_at     TEXT DEFAULT (datetime('now')),
+                UNIQUE(series_id, season_number, episode_number),
+                FOREIGN KEY (series_id) REFERENCES series(id) ON DELETE CASCADE
+            )
+        """)
+
+        # ── 11. users jadvaliga yangi ustunlar qo'shish ───────────────
+        user_columns = [
             ("night_mode", "INTEGER DEFAULT 0"),
             ("notify",     "INTEGER DEFAULT 1"),
             ("balance",    "INTEGER DEFAULT 0"),
         ]
-        for col_name, col_def in new_columns:
+        for col_name, col_def in user_columns:
             try:
-                await db.execute(
-                    f"ALTER TABLE users ADD COLUMN {col_name} {col_def}"
-                )
+                await db.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}")
             except Exception:
-                pass  # Ustun allaqachon mavjud — o'tkazib yuboramiz
+                pass
 
-        # ── 9. movies jadvaliga yangi ustunlar ────────────────────────
+        # ── 12. movies jadvaliga barcha yangi ustunlarni qo'shish ──────
         movie_columns = [
-            ("title_ru",  "TEXT"),
-            ("country",   "TEXT"),
-            ("status",    "TEXT DEFAULT 'active'"),
+            ("title_ru",       "TEXT"),
+            ("country",        "TEXT"),
+            ("status",         "TEXT DEFAULT 'active'"),
+            ("title_uz",       "TEXT"),
+            ("genres",         "TEXT"),
+            ("poster_file_id", "TEXT"),
         ]
         for col_name, col_def in movie_columns:
             try:
-                await db.execute(
-                    f"ALTER TABLE movies ADD COLUMN {col_name} {col_def}"
-                )
+                await db.execute(f"ALTER TABLE movies ADD COLUMN {col_name} {col_def}")
             except Exception:
                 pass
 
         await db.commit()
-        print("✅ Migration muvaffaqiyatli bajarildi!")
+        print("✅ Migration muvaffaqiyatli bajarildi! Barcha eski va yangi jadvallar integratsiya qilindi.")

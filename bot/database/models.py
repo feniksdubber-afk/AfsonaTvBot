@@ -80,16 +80,27 @@ CREATE TABLE IF NOT EXISTS user_ratings (
     UNIQUE(user_id, movie_id)
 );
 
--- Premium to'lovlar
+-- Premium Tariflar
+CREATE TABLE IF NOT EXISTS tariffs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    duration    INTEGER NOT NULL,  -- kunlar
+    price       INTEGER NOT NULL,  -- so'm
+    description TEXT,
+    is_active   INTEGER DEFAULT 1
+);
+
+-- Premium to'lovlar (Yangilangan variant)
 CREATE TABLE IF NOT EXISTS payments (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id    INTEGER,
-    amount     INTEGER,
-    tariff     TEXT,
-    method     TEXT,
-    status     TEXT DEFAULT 'pending',
-    check_id   TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    tariff_id   INTEGER,
+    amount      INTEGER NOT NULL,
+    method      TEXT,              -- click / payme / card
+    status      TEXT DEFAULT 'pending',  -- pending/paid/rejected
+    transaction_id TEXT,
+    created_at  TEXT DEFAULT (datetime('now')),
+    paid_at     TEXT
 );
 
 -- Promokodlar

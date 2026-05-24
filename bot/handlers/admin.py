@@ -771,3 +771,326 @@ async def req_reject(call: CallbackQuery):
 
     await call.message.edit_text("❌ So'rov rad etildi!")
     await call.answer()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  👥 FOYDALANUVCHILAR BOSHQARUVI
+# ══════════════════════════════════════════════════════════════════════
+@router.message(F.text == "👥 Foydalanuvchilar", F.from_user.id.in_(ADMINS))
+async def admin_users_list(message: Message):
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT tg_id, full_name, username, is_premium, is_banned FROM users ORDER BY id DESC LIMIT 20"
+        ) as cur:
+            rows = await cur.fetchall()
+        async with db.execute("SELECT COUNT(*) FROM users") as cur:
+            total = (await cur.fetchone())[0]
+        async with db.execute("SELECT COUNT(*) FROM users WHERE is_premium = 1") as cur:
+            premium_count = (await cur.fetchone())[0]
+        async with db.execute("SELECT COUNT(*) FROM users WHERE is_banned = 1") as cur:
+            banned_count = (await cur.fetchone())[0]
+
+    if not rows:
+        await message.answer("Foydalanuvchilar yo'q.")
+        return
+
+    lines = [
+        f"👥 <b>Foydalanuvchilar</b>\n"
+        f"📊 Jami: {total} | ⭐ Premium: {premium_count} | 🚫 Ban: {banned_count}\n\n"
+        "Oxirgi 20 ta:\n"
+    ]
+    for tg_id, name, username, is_prem, is_ban in rows:
+        prem = "⭐" if is_prem else "  "
+        ban  = "🚫" if is_ban  else "  "
+        uname = f"@{username}" if username else "—"
+        lines.append(f"{prem}{ban} <code>{tg_id}</code> — {name} ({uname})")
+
+    lines.append("\n\nFoydalanuvchi ID sini /user_123456 formatda yuboring.")
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(F.text.startswith("/user_"), F.from_user.id.in_(ADMINS))
+async def admin_user_detail(message: Message):
+    try:
+        user_id = int(message.text.split("_")[1])
+    except (IndexError, ValueError):
+        await message.answer("❌ Format: /user_123456")
+        return
+
+    async with get_db() as db:
+        async with db.execute("SELECT * FROM users WHERE tg_id = ?", (user_id,)) as cur:
+            row = await cur.fetchone()
+            if not row:
+                await message.answer("❌ Foydalanuvchi topilmadi.")
+                return
+            cols = [d[0] for d in cur.description]
+            u = dict(zip(cols, row))
+
+    text = (
+        f"👤 <b>Foydalanuvchi</b>\n\n"
+        f"🆔 ID: <code>{u['tg_id']}</code>\n"
+        f"👨 Ism: {u['full_name']}\n"
+        f"@username: {u.get('username') or '—'}\n"
+        f"🌐 Til: {u['lang']}\n"
+        f"⭐ Premium: {'Ha ✅' if u['is_premium'] else 'Yo\\'q'}\n"
+        f"📅 Premium muddat: {u.get('premium_until') or '—'}\n"
+        f"💰 Balans: {u['balance']} ball\n"
+        f"🚫 Ban: {'Ha' if u['is_banned'] else 'Yo\\'q'}\n"
+        f"📅 Qo'shildi: {u.get('created_at', '?')[:10]}"
+    )
+    await message.answer(
+        text,
+        reply_markup=user_manage_kb(u['tg_id'], u['is_banned']),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("ban_"), F.from_user.id.in_(ADMINS))
+async def ban_user(call: CallbackQuery):
+    user_id = int(call.data.split("_")[1])
+    async with get_db() as db:
+        await db.execute("UPDATE users SET is_banned = 1 WHERE tg_id = ?", (user_id,))
+        await db.commit()
+    await call.answer("🚫 Foydalanuvchi ban qilindi!", show_alert=True)
+    try:
+        await call.message.edit_reply_markup(reply_markup=user_manage_kb(user_id, 1))
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("unban_"), F.from_user.id.in_(ADMINS))
+async def unban_user(call: CallbackQuery):
+    user_id = int(call.data.split("_")[1])
+    async with get_db() as db:
+        await db.execute("UPDATE users SET is_banned = 0 WHERE tg_id = ?", (user_id,))
+        await db.commit()
+    await call.answer("✅ Ban olib tashlandi!", show_alert=True)
+    try:
+        await call.message.edit_reply_markup(reply_markup=user_manage_kb(user_id, 0))
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("give_premium_"), F.from_user.id.in_(ADMINS))
+async def give_premium_cb(call: CallbackQuery, state: FSMContext):
+    user_id = int(call.data.split("_")[2])
+    await state.update_data(target=user_id)
+    await state.set_state(GivePremiumState.waiting)
+    await call.message.answer(f"⭐ Necha kun premium berish? (<code>{user_id}</code>)", parse_mode="HTML")
+    await call.answer()
+
+
+@router.message(GivePremiumState.waiting, F.from_user.id.in_(ADMINS))
+async def give_premium_days(message: Message, state: FSMContext):
+    data = await state.get_data()
+    target = data.get("target")
+    await state.clear()
+
+    if not message.text or not message.text.strip().isdigit():
+        await message.answer("❌ Kunlar sonini raqam bilan yuboring!")
+        return
+
+    days = int(message.text.strip())
+    from bot.handlers.premium import activate_premium
+    new_until = await activate_premium(target, days)
+
+    await message.answer(f"✅ {target} ga {days} kun premium berildi. Muddat: {new_until}")
+    try:
+        await message.bot.send_message(
+            target,
+            f"🎉 Sizga <b>{days} kunlik Premium</b> berildi!\n📅 Muddat: {new_until}",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("msg_user_"), F.from_user.id.in_(ADMINS))
+async def msg_user_cb(call: CallbackQuery, state: FSMContext):
+    user_id = int(call.data.split("_")[2])
+    await state.update_data(target=user_id)
+    await state.set_state(MsgUserState.waiting)
+    await call.message.answer(f"💬 Xabar yozing (<code>{user_id}</code> ga yuboriladi):", parse_mode="HTML")
+    await call.answer()
+
+
+@router.message(MsgUserState.waiting, F.from_user.id.in_(ADMINS))
+async def msg_user_send(message: Message, state: FSMContext):
+    data = await state.get_data()
+    target = data.get("target")
+    await state.clear()
+    try:
+        await message.bot.send_message(target, message.text or "")
+        await message.answer("✅ Xabar yuborildi!")
+    except Exception as e:
+        await message.answer(f"❌ Xato: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  🔧 SOZLAMALAR — Karta raqami va obuna narxlari
+# ══════════════════════════════════════════════════════════════════════
+class SettingsState(StatesGroup):
+    waiting_card_number = State()
+    waiting_card_owner  = State()
+    waiting_tariff_edit = State()
+    tariff_id           = State()
+
+
+def _settings_kb():
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Karta raqami",  callback_data="set_card_number")],
+        [InlineKeyboardButton(text="👤 Karta egasi",   callback_data="set_card_owner")],
+        [InlineKeyboardButton(text="💰 Tarif narxlari", callback_data="set_tariffs")],
+        [InlineKeyboardButton(text="❌ Yopish",        callback_data="close_settings")],
+    ])
+
+
+@router.message(F.text == "🔧 Sozlamalar", F.from_user.id.in_(ADMINS))
+async def admin_settings(message: Message):
+    async with get_db() as db:
+        async with db.execute("SELECT key, value FROM settings WHERE key IN ('card_number','card_owner')") as cur:
+            rows = await cur.fetchall()
+
+    s = dict(rows)
+    card_num   = s.get("card_number", "—")
+    card_owner = s.get("card_owner",  "—")
+
+    text = (
+        f"🔧 <b>Sozlamalar</b>\n\n"
+        f"💳 Karta raqami: <code>{card_num}</code>\n"
+        f"👤 Karta egasi: <b>{card_owner}</b>\n\n"
+        f"Tahrirlash uchun tugmani bosing:"
+    )
+    await message.answer(text, reply_markup=_settings_kb(), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "set_card_number", F.from_user.id.in_(ADMINS))
+async def set_card_number_start(call: CallbackQuery, state: FSMContext):
+    await call.message.answer("💳 Yangi karta raqamini yuboring:\n\nMisol: <code>8600 1234 5678 9012</code>", parse_mode="HTML")
+    await state.set_state(SettingsState.waiting_card_number)
+    await call.answer()
+
+
+@router.message(SettingsState.waiting_card_number, F.from_user.id.in_(ADMINS))
+async def set_card_number_save(message: Message, state: FSMContext):
+    await state.clear()
+    val = (message.text or "").strip()
+    if not val:
+        await message.answer("❌ Bo'sh bo'lishi mumkin emas!")
+        return
+    async with get_db() as db:
+        await db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('card_number', ?)", (val,))
+        await db.commit()
+    await message.answer(f"✅ Karta raqami saqlandi:\n<code>{val}</code>", parse_mode="HTML",
+                         reply_markup=_settings_kb())
+
+
+@router.callback_query(F.data == "set_card_owner", F.from_user.id.in_(ADMINS))
+async def set_card_owner_start(call: CallbackQuery, state: FSMContext):
+    await call.message.answer("👤 Karta egasining ismini yuboring:\n\nMisol: Abdullayev Sardor")
+    await state.set_state(SettingsState.waiting_card_owner)
+    await call.answer()
+
+
+@router.message(SettingsState.waiting_card_owner, F.from_user.id.in_(ADMINS))
+async def set_card_owner_save(message: Message, state: FSMContext):
+    await state.clear()
+    val = (message.text or "").strip()
+    if not val:
+        await message.answer("❌ Bo'sh bo'lishi mumkin emas!")
+        return
+    async with get_db() as db:
+        await db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('card_owner', ?)", (val,))
+        await db.commit()
+    await message.answer(f"✅ Karta egasi saqlandi: <b>{val}</b>", parse_mode="HTML",
+                         reply_markup=_settings_kb())
+
+
+@router.callback_query(F.data == "set_tariffs", F.from_user.id.in_(ADMINS))
+async def set_tariffs_list(call: CallbackQuery):
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    async with get_db() as db:
+        async with db.execute("SELECT id, name, duration, price FROM tariffs ORDER BY price") as cur:
+            rows = await cur.fetchall()
+
+    if not rows:
+        await call.answer("Tarifflar yo'q!", show_alert=True)
+        return
+
+    buttons = [
+        [InlineKeyboardButton(
+            text=f"⭐ {name} — {price:,} so'm ({duration} kun)",
+            callback_data=f"edit_tariff_{tid}"
+        )]
+        for tid, name, duration, price in rows
+    ]
+    buttons.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="close_settings")])
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await call.message.edit_text("💰 <b>Tarif narxlari</b>\n\nTahrirlamoqchi bo'lgan tarifni tanlang:", reply_markup=kb, parse_mode="HTML")
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("edit_tariff_"), F.from_user.id.in_(ADMINS))
+async def edit_tariff_start(call: CallbackQuery, state: FSMContext):
+    tariff_id = int(call.data.split("_")[2])
+    async with get_db() as db:
+        async with db.execute("SELECT id, name, duration, price FROM tariffs WHERE id = ?", (tariff_id,)) as cur:
+            row = await cur.fetchone()
+
+    if not row:
+        await call.answer("❌ Tarif topilmadi!", show_alert=True)
+        return
+
+    tid, name, duration, price = row
+    await state.update_data(tariff_id=tid)
+    await state.set_state(SettingsState.waiting_tariff_edit)
+    await call.message.answer(
+        f"⭐ <b>{name}</b>\n"
+        f"📅 Muddat: {duration} kun\n"
+        f"💰 Narx: {price:,} so'm\n\n"
+        f"Yangi narxni yuboring (faqat so'mda):\nMisol: 29900",
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+
+@router.message(SettingsState.waiting_tariff_edit, F.from_user.id.in_(ADMINS))
+async def edit_tariff_save(message: Message, state: FSMContext):
+    data = await state.get_data()
+    tariff_id = data.get("tariff_id")
+    await state.clear()
+
+    val = (message.text or "").strip().replace(" ", "").replace(",", "")
+    if not val.isdigit():
+        await message.answer("❌ Faqat raqam kiriting (so'mda)!\nMisol: 29900")
+        return
+
+    price = int(val)
+    async with get_db() as db:
+        await db.execute("UPDATE tariffs SET price = ? WHERE id = ?", (price, tariff_id))
+        await db.commit()
+
+    await message.answer(f"✅ Tarif narxi yangilandi: <b>{price:,} so'm</b>", parse_mode="HTML",
+                         reply_markup=_settings_kb())
+
+
+@router.callback_query(F.data == "close_settings", F.from_user.id.in_(ADMINS))
+async def close_settings(call: CallbackQuery):
+    await call.message.edit_text("🔧 Sozlamalar yopildi.")
+    await call.answer()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  🏠 BOSH MENYU (admin paneldan qaytish)
+# ══════════════════════════════════════════════════════════════════════
+@router.message(F.text == "🏠 Bosh menyu", F.from_user.id.in_(ADMINS))
+async def admin_back_to_main(message: Message):
+    async with get_db() as db:
+        async with db.execute("SELECT lang FROM users WHERE tg_id = ?", (message.from_user.id,)) as cur:
+            row = await cur.fetchone()
+    lang = row[0] if row else "uz"
+    await message.answer(
+        "🏠 Bosh menyuga qaytildi.",
+        reply_markup=main_menu(lang)
+    )

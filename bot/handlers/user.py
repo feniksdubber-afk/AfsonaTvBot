@@ -766,3 +766,142 @@ async def back_profile(call: CallbackQuery):
 @router.callback_query(F.data == "noop")
 async def noop(call: CallbackQuery):
     await call.answer()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  🎬 KINOLAR MENYUSI
+# ══════════════════════════════════════════════════════════════════════
+@router.message(F.text.in_(["🎬 Kinolar", "🎬 Фильмы"]))
+async def show_movies_menu(message: Message):
+    user = await get_user(message.from_user.id)
+    lang = user["lang"] if user else "uz"
+
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM movies WHERE status = 'active'"
+        ) as cur:
+            total = (await cur.fetchone())[0]
+
+        async with db.execute(
+            """SELECT code, COALESCE(title_uz, title, 'Nomsiz') as title,
+                      year, genres, is_premium
+               FROM movies WHERE status = 'active'
+               ORDER BY id DESC LIMIT 8"""
+        ) as cur:
+            rows = await cur.fetchall()
+
+    if not rows:
+        text = txt("🎬 Hozircha kinolar yo'q.", "🎬 Фильмов пока нет.", lang)
+        await message.answer(text)
+        return
+
+    lines = []
+    for code, title, year, genres, is_prem in rows:
+        prem = "⭐" if is_prem else "🔓"
+        y = f"({year})" if year else ""
+        lines.append(f"{prem} <code>{code}</code> — <b>{title}</b> {y}")
+
+    hint = txt(
+        f"\n📊 Jami: <b>{total} ta</b> kino\n\n🔍 Kino kodini yuboring — bot ko'rsatadi.\n"
+        f"Qidirish uchun: /search",
+        f"\n📊 Всего: <b>{total}</b> фильмов\n\n🔍 Отправьте код фильма — бот покажет.\n"
+        f"Поиск: /search",
+        lang
+    )
+    text = (
+        txt("🎬 <b>Oxirgi kinolar</b>\n\n", "🎬 <b>Последние фильмы</b>\n\n", lang)
+        + "\n".join(lines)
+        + hint
+    )
+    await message.answer(text, parse_mode="HTML")
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  🔍 QIDIRISH
+# ══════════════════════════════════════════════════════════════════════
+class SearchState(StatesGroup):
+    waiting_query = State()
+
+
+@router.message(F.text.in_(["🔍 Qidirish", "🔍 Поиск"]))
+@router.message(F.text == "/search")
+async def search_start(message: Message, state: FSMContext):
+    user = await get_user(message.from_user.id)
+    lang = user["lang"] if user else "uz"
+    await message.answer(
+        txt(
+            "🔍 Kino yoki serial nomini yozing:",
+            "🔍 Введите название фильма или сериала:",
+            lang
+        )
+    )
+    await state.set_state(SearchState.waiting_query)
+
+
+@router.message(SearchState.waiting_query)
+async def search_process(message: Message, state: FSMContext):
+    user = await get_user(message.from_user.id)
+    lang = user["lang"] if user else "uz"
+    query = (message.text or "").strip()
+
+    if not query or len(query) < 2:
+        await message.answer(txt("❌ Kamida 2 ta harf kiriting.", "❌ Введите минимум 2 символа.", lang))
+        return
+
+    await state.clear()
+    like = f"%{query}%"
+
+    async with get_db() as db:
+        # Filmlar
+        async with db.execute(
+            """SELECT code, COALESCE(title_uz, title, 'Nomsiz') as title,
+                      year, genres, is_premium
+               FROM movies
+               WHERE status = 'active'
+                 AND (title_uz LIKE ? OR title LIKE ? OR title_ru LIKE ? OR code LIKE ?)
+               ORDER BY views DESC LIMIT 10""",
+            (like, like, like, like)
+        ) as cur:
+            movies = await cur.fetchall()
+
+        # Seriallar
+        async with db.execute(
+            """SELECT code, COALESCE(title_uz, 'Nomsiz serial') as title,
+                      year, genres, is_premium
+               FROM series
+               WHERE status = 'active'
+                 AND (title_uz LIKE ? OR title_ru LIKE ? OR code LIKE ?)
+               ORDER BY id DESC LIMIT 5""",
+            (like, like, like)
+        ) as cur:
+            series_rows = await cur.fetchall()
+
+    all_results = [("movie", *r) for r in movies] + [("series", *r) for r in series_rows]
+
+    if not all_results:
+        text = txt(
+            f"🔍 «{query}» bo'yicha hech narsa topilmadi.",
+            f"🔍 По запросу «{query}» ничего не найдено.",
+            lang
+        )
+        await message.answer(text)
+        return
+
+    lines = []
+    for ctype, code, title, year, genres, is_prem in all_results:
+        icon = "🎬" if ctype == "movie" else "📺"
+        prem = "⭐" if is_prem else "🔓"
+        y = f"({year})" if year else ""
+        lines.append(f"{icon} {prem} <code>{code}</code> — <b>{title}</b> {y}")
+
+    hint = txt(
+        "\nKodini yuboring — bot ko'rsatadi.",
+        "\nОтправьте код — бот покажет.",
+        lang
+    )
+    text = (
+        txt(f"🔍 «{query}» natijalari:\n\n", f"🔍 Результаты «{query}»:\n\n", lang)
+        + "\n".join(lines)
+        + hint
+    )
+    await message.answer(text, parse_mode="HTML")

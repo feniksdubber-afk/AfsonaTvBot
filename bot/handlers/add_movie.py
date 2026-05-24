@@ -281,25 +281,29 @@ async def admin_video_received(message: Message, state: FSMContext) -> None:
     """
     Admin video yuborganda caption dan parse qiladi va preview ko'rsatadi.
 
-    MUHIM: Boshqa FSM holati bo'lsa (masalan FilmStates.waiting_video),
-           bu handler o'tkazib yuboradi — aiogram router tartibiga ko'ra
-           FSM state filter bilan belgilangan handler birinchi ishlaydi.
+    YAXSHILASHLAR:
+    - Caption bo'lmasa bot xato bermaydi — bo'sh data bilan preview ko'rsatadi
+    - document (zip/avi kabi) ham qabul qilinadi
+    - Fasl/qism (S01E01) captiondan avtomatik aniqlanadi
+    - FSM holatida bo'lsa o'tkazib yuboradi
     """
     current_state = await state.get_state()
-
-    # TUZATISH: 'State' in str() noto'g'ri — to'g'ri usul: is not None
     if current_state is not None:
-        # Boshqa FSM holati faol — bu handler uchun emas
         return
 
-    caption = message.caption or ""
+    caption = (message.caption or "").strip()
 
     if message.video:
         file_id   = message.video.file_id
         file_type = "video"
+        # Video file nomidan ham parse qilishga urinish
+        if not caption and message.video.file_name:
+            caption = message.video.file_name.replace("_", " ").replace("-", " ")
     else:
         file_id   = message.document.file_id
         file_type = "document"
+        if not caption and message.document.file_name:
+            caption = message.document.file_name.replace("_", " ").replace("-", " ")
 
     data = _parse_caption(caption)
     data["file_id"]   = file_id
@@ -314,7 +318,13 @@ async def admin_video_received(message: Message, state: FSMContext) -> None:
     await state.update_data(am_data=data)
 
     preview = _preview_text(data, file_type)
-    await message.answer(preview, reply_markup=_confirm_kb(), parse_mode="HTML")
+    tip = (
+        "\n\n💡 <i>Caption formatlar:</i>\n"
+        "<code>Avatar 2009 Drama</code>\n"
+        "<code>Merlin S01E01 Fantasy serial</code>\n"
+        "<code>#AVT1 Avatar | Drama | 2009 | premium</code>"
+    )
+    await message.answer(preview + tip, reply_markup=_confirm_kb(), parse_mode="HTML")
 
 
 # ════════════════════════════════════════════════════════════════════

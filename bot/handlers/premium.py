@@ -1,3 +1,15 @@
+"""
+premium.py
+──────────
+Premium va to'lov handlerlari.
+
+To'lov tizimi:
+  - FAQAT karta + screenshot (manual)
+  - Click va Payme o'chirilgan
+  - Karta raqami va egasi — admin paneldan (settings jadvalidan) boshqariladi
+  - Tarif narxlari — admin paneldan boshqariladi
+"""
+
 from datetime import datetime, timedelta
 
 from aiogram import Router, F
@@ -6,14 +18,11 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-from bot.config import (
-    ADMINS, CLICK_SERVICE_ID, CLICK_MERCHANT_ID,
-    PAYME_MERCHANT_ID
-)
+from bot.config import ADMINS
 from bot.database.db import get_db
 from bot.keyboards.user_kb import (
-    main_menu, premium_tariffs_kb, payment_method_kb,
-    payment_confirm_kb, admin_payment_kb, back_kb
+    main_menu, premium_tariffs_kb,
+    admin_payment_kb, back_kb
 )
 
 router = Router()
@@ -43,6 +52,15 @@ async def get_tariffs() -> list:
             rows = await cur.fetchall()
             cols = [d[0] for d in cur.description]
             return [dict(zip(cols, r)) for r in rows]
+
+async def get_setting(key: str, default: str = "") -> str:
+    """settings jadvalidan qiymat oladi."""
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT value FROM settings WHERE key = ?", (key,)
+        ) as cur:
+            row = await cur.fetchone()
+    return row[0] if row else default
 
 async def activate_premium(user_id: int, days: int):
     async with get_db() as db:
@@ -138,7 +156,7 @@ async def show_premium(event: Message | CallbackQuery):
 
 # ── Tarif tanlash ──────────────────────────────────────
 @router.callback_query(F.data.startswith("buy_tariff_"))
-async def buy_tariff(call: CallbackQuery):
+async def buy_tariff(call: CallbackQuery, state: FSMContext):
     tariff_id = int(call.data.split("_")[2])
     user = await get_user(call.from_user.id)
     lang = user["lang"]
@@ -151,242 +169,11 @@ async def buy_tariff(call: CallbackQuery):
                 return
             tariff = dict(zip([d[0] for d in cur.description], row))
 
-    text = txt(
-        f"⭐ <b>{tariff['name']}</b>\n\n"
-        f"📅 Muddat: {tariff['duration']} kun\n"
-        f"💰 Narx: {tariff['price']:,} so'm\n\n"
-        f"To'lov usulini tanlang:",
-        f"⭐ <b>{tariff['name']}</b>\n\n"
-        f"📅 Срок: {tariff['duration']} дней\n"
-        f"💰 Цена: {tariff['price']:,} сум\n\n"
-        f"Выберите способ оплаты:",
-        lang
-    )
-    await call.message.edit_text(text, reply_markup=payment_method_kb(tariff_id, lang), parse_mode="HTML")
-
-
-# ════════════════════════════════════════════════════════
-#  💳 CLICK TO'LOV
-# ════════════════════════════════════════════════════════
-@router.callback_query(F.data.startswith("pay_click_"))
-async def pay_click(call: CallbackQuery):
-    tariff_id = int(call.data.split("_")[2])
-    user = await get_user(call.from_user.id)
-    lang = user["lang"]
+    # Karta ma'lumotlarini DB dan olish
+    card_number = await get_setting("card_number", "0000 0000 0000 0000")
+    card_owner  = await get_setting("card_owner",  "Bot Admin")
 
     async with get_db() as db:
-        async with db.execute("SELECT * FROM tariffs WHERE id = ?", (tariff_id,)) as cur:
-            row = await cur.fetchone()
-            tariff = dict(zip([d[0] for d in cur.description], row))
-
-        # To'lov yozuvi yaratish
-        async with db.execute(
-            """INSERT INTO payments (user_id, tariff_id, amount, method)
-               VALUES (?, ?, ?, 'click') RETURNING id""",
-            (call.from_user.id, tariff_id, tariff["price"])
-        ) as cur:
-            payment_id = (await cur.fetchone())[0]
-        await db.commit()
-
-    # Click to'lov havolasi
-    amount_tiyin = tariff["price"] * 100  # so'm → tiyin
-    click_url = (
-        f"https://my.click.uz/services/pay"
-        f"?service_id={CLICK_SERVICE_ID}"
-        f"&merchant_id={CLICK_MERCHANT_ID}"
-        f"&amount={amount_tiyin}"
-        f"&transaction_param={payment_id}"
-        f"&return_url=https://t.me/{(await call.bot.get_me()).username}"
-    )
-
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Click orqali to'lash", url=click_url)],
-        [InlineKeyboardButton(text="✅ To'lovni tekshirish", callback_data=f"verify_click_{payment_id}")],
-        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="show_premium")],
-    ])
-
-    text = txt(
-        f"💳 <b>Click orqali to'lov</b>\n\n"
-        f"💰 Summa: <b>{tariff['price']:,} so'm</b>\n"
-        f"🔑 To'lov ID: <code>{payment_id}</code>\n\n"
-        f"Tugmani bosib to'lovni amalga oshiring,\n"
-        f"so'ng «✅ To'lovni tekshirish» tugmasini bosing.",
-        f"💳 <b>Оплата через Click</b>\n\n"
-        f"💰 Сумма: <b>{tariff['price']:,} сум</b>\n"
-        f"🔑 ID платежа: <code>{payment_id}</code>\n\n"
-        f"Нажмите кнопку для оплаты,\n"
-        f"затем нажмите «✅ Проверить оплату».",
-        lang
-    )
-    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-
-
-@router.callback_query(F.data.startswith("verify_click_"))
-async def verify_click(call: CallbackQuery):
-    payment_id = int(call.data.split("_")[2])
-    user = await get_user(call.from_user.id)
-    lang = user["lang"]
-
-    async with get_db() as db:
-        async with db.execute(
-            "SELECT * FROM payments WHERE id = ? AND user_id = ?",
-            (payment_id, call.from_user.id)
-        ) as cur:
-            row = await cur.fetchone()
-            if not row:
-                await call.answer("❌ To'lov topilmadi!", show_alert=True)
-                return
-            payment = dict(zip([d[0] for d in cur.description], row))
-
-    if payment["status"] == "paid":
-        await call.answer(
-            txt("✅ To'lov allaqachon tasdiqlangan!", "✅ Оплата уже подтверждена!", lang),
-            show_alert=True
-        )
-        return
-
-    # Click API orqali tekshirish (sandbox uchun — real integratsiyada webhook ishlatiladi)
-    # Hozircha admin tasdiqlashiga yo'naltiramiz
-    text = txt(
-        f"⏳ To'lovingiz tekshirilmoqda...\n"
-        f"🔑 To'lov ID: <code>{payment_id}</code>\n\n"
-        f"Agar to'lov o'tgan bo'lsa, 1-5 daqiqa ichida faollashadi.\n"
-        f"Muammo bo'lsa /support yozing.",
-        f"⏳ Ваш платёж проверяется...\n"
-        f"🔑 ID: <code>{payment_id}</code>\n\n"
-        f"Если оплата прошла, активация в течение 1-5 минут.\n"
-        f"При проблемах напишите /support.",
-        lang
-    )
-    await call.message.edit_text(text, parse_mode="HTML")
-
-    # Adminlarga xabar
-    for admin_id in ADMINS:
-        try:
-            await call.bot.send_message(
-                admin_id,
-                f"💳 <b>Click to'lov tekshiruvi</b>\n\n"
-                f"👤 {call.from_user.full_name} (<code>{call.from_user.id}</code>)\n"
-                f"💰 {payment['amount']:,} so'm\n"
-                f"🔑 Payment ID: {payment_id}",
-                reply_markup=admin_payment_kb(payment_id, call.from_user.id),
-                parse_mode="HTML"
-            )
-        except Exception:
-            pass
-
-
-# ════════════════════════════════════════════════════════
-#  💳 PAYME TO'LOV
-# ════════════════════════════════════════════════════════
-@router.callback_query(F.data.startswith("pay_payme_"))
-async def pay_payme(call: CallbackQuery):
-    tariff_id = int(call.data.split("_")[2])
-    user = await get_user(call.from_user.id)
-    lang = user["lang"]
-
-    async with get_db() as db:
-        async with db.execute("SELECT * FROM tariffs WHERE id = ?", (tariff_id,)) as cur:
-            row = await cur.fetchone()
-            tariff = dict(zip([d[0] for d in cur.description], row))
-
-        async with db.execute(
-            """INSERT INTO payments (user_id, tariff_id, amount, method)
-               VALUES (?, ?, ?, 'payme') RETURNING id""",
-            (call.from_user.id, tariff_id, tariff["price"])
-        ) as cur:
-            payment_id = (await cur.fetchone())[0]
-        await db.commit()
-
-    import base64, json
-    amount_tiyin = tariff["price"] * 100
-    params = json.dumps({
-        "m": PAYME_MERCHANT_ID,
-        "ac.payment_id": str(payment_id),
-        "a": amount_tiyin,
-        "l": lang
-    })
-    encoded = base64.b64encode(params.encode()).decode()
-    payme_url = f"https://checkout.paycom.uz/{encoded}"
-
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Payme orqali to'lash", url=payme_url)],
-        [InlineKeyboardButton(text="✅ To'lovni tekshirish", callback_data=f"verify_payme_{payment_id}")],
-        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="show_premium")],
-    ])
-
-    text = txt(
-        f"💳 <b>Payme orqali to'lov</b>\n\n"
-        f"💰 Summa: <b>{tariff['price']:,} so'm</b>\n"
-        f"🔑 To'lov ID: <code>{payment_id}</code>\n\n"
-        f"Tugmani bosib to'lovni amalga oshiring,\n"
-        f"so'ng «✅ To'lovni tekshirish» tugmasini bosing.",
-        f"💳 <b>Оплата через Payme</b>\n\n"
-        f"💰 Сумма: <b>{tariff['price']:,} сум</b>\n"
-        f"🔑 ID платежа: <code>{payment_id}</code>\n\n"
-        f"Нажмите кнопку для оплаты,\n"
-        f"затем нажмите «✅ Проверить оплату».",
-        lang
-    )
-    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-
-
-@router.callback_query(F.data.startswith("verify_payme_"))
-async def verify_payme(call: CallbackQuery):
-    payment_id = int(call.data.split("_")[2])
-    user = await get_user(call.from_user.id)
-    lang = user["lang"]
-
-    async with get_db() as db:
-        async with db.execute(
-            "SELECT * FROM payments WHERE id = ? AND user_id = ?",
-            (payment_id, call.from_user.id)
-        ) as cur:
-            row = await cur.fetchone()
-            payment = dict(zip([d[0] for d in cur.description], row))
-
-    if payment["status"] == "paid":
-        await call.answer(txt("✅ Allaqachon faollashgan!", "✅ Уже активировано!", lang), show_alert=True)
-        return
-
-    text = txt(
-        f"⏳ Payme to'lovingiz tekshirilmoqda...\n🔑 ID: <code>{payment_id}</code>",
-        f"⏳ Платёж Payme проверяется...\n🔑 ID: <code>{payment_id}</code>",
-        lang
-    )
-    await call.message.edit_text(text, parse_mode="HTML")
-
-    for admin_id in ADMINS:
-        try:
-            await call.bot.send_message(
-                admin_id,
-                f"💳 <b>Payme to'lov tekshiruvi</b>\n\n"
-                f"👤 {call.from_user.full_name} (<code>{call.from_user.id}</code>)\n"
-                f"💰 {payment['amount']:,} so'm\n"
-                f"🔑 Payment ID: {payment_id}",
-                reply_markup=admin_payment_kb(payment_id, call.from_user.id),
-                parse_mode="HTML"
-            )
-        except Exception:
-            pass
-
-
-# ════════════════════════════════════════════════════════
-#  💳 KARTA (MANUAL) TO'LOV
-# ════════════════════════════════════════════════════════
-@router.callback_query(F.data.startswith("pay_card_"))
-async def pay_card(call: CallbackQuery, state: FSMContext):
-    tariff_id = int(call.data.split("_")[2])
-    user = await get_user(call.from_user.id)
-    lang = user["lang"]
-
-    async with get_db() as db:
-        async with db.execute("SELECT * FROM tariffs WHERE id = ?", (tariff_id,)) as cur:
-            row = await cur.fetchone()
-            tariff = dict(zip([d[0] for d in cur.description], row))
-
         async with db.execute(
             """INSERT INTO payments (user_id, tariff_id, amount, method)
                VALUES (?, ?, ?, 'card') RETURNING id""",
@@ -400,41 +187,66 @@ async def pay_card(call: CallbackQuery, state: FSMContext):
 
     text = txt(
         f"💳 <b>Karta orqali to'lov</b>\n\n"
+        f"⭐ Tarif: <b>{tariff['name']}</b>\n"
+        f"📅 Muddat: {tariff['duration']} kun\n"
         f"💰 Summa: <b>{tariff['price']:,} so'm</b>\n\n"
         f"Quyidagi kartaga o'tkazing:\n"
-        f"<code>8600 1234 5678 9012</code>\n"
-        f"👤 Abdullayev Sardor\n\n"
-        f"To'lovdan so'ng chek (screenshot) yuboring:",
+        f"<code>{card_number}</code>\n"
+        f"👤 {card_owner}\n\n"
+        f"To'lovdan so'ng <b>chek (screenshot)</b> yuboring:",
         f"💳 <b>Оплата картой</b>\n\n"
+        f"⭐ Тариф: <b>{tariff['name']}</b>\n"
+        f"📅 Срок: {tariff['duration']} дней\n"
         f"💰 Сумма: <b>{tariff['price']:,} сум</b>\n\n"
         f"Переведите на карту:\n"
-        f"<code>8600 1234 5678 9012</code>\n"
-        f"👤 Abdullayev Sardor\n\n"
-        f"После оплаты отправьте чек (скриншот):",
+        f"<code>{card_number}</code>\n"
+        f"👤 {card_owner}\n\n"
+        f"После оплаты отправьте <b>чек (скриншот)</b>:",
         lang
     )
-    await call.message.edit_text(text, parse_mode="HTML")
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="show_premium")],
+    ])
+    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    await call.answer()
 
 
 @router.message(CardPayState.waiting_receipt)
 async def card_receipt_received(message: Message, state: FSMContext):
     data = await state.get_data()
-    payment_id = data["payment_id"]
+    payment_id = data.get("payment_id")
     user = await get_user(message.from_user.id)
-    lang = user["lang"]
+    lang = user["lang"] if user else "uz"
 
     if not (message.photo or message.document):
-        text = txt("🖼 Iltimos chek rasmini yuboring!", "🖼 Пожалуйста отправьте скриншот чека!", lang)
+        text = txt(
+            "🖼 Iltimos chek rasmini yuboring!",
+            "🖼 Пожалуйста отправьте скриншот чека!",
+            lang
+        )
         await message.answer(text)
         return
 
     await state.clear()
 
-    # Adminlarga chekni yuborish
+    # Summa ma'lumotini DB dan olish
+    amount_text = ""
+    if payment_id:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT p.amount, t.name FROM payments p LEFT JOIN tariffs t ON p.tariff_id = t.id WHERE p.id = ?",
+                (payment_id,)
+            ) as cur:
+                prow = await cur.fetchone()
+        if prow:
+            amount_text = f"\n💰 Summa: {prow[0]:,} so'm | Tarif: {prow[1] or '—'}"
+
     caption = (
         f"💳 <b>Karta to'lov cheki</b>\n\n"
         f"👤 {message.from_user.full_name} (<code>{message.from_user.id}</code>)\n"
         f"🔑 Payment ID: {payment_id}"
+        f"{amount_text}"
     )
     for admin_id in ADMINS:
         try:
@@ -468,8 +280,8 @@ async def card_receipt_received(message: Message, state: FSMContext):
 # ════════════════════════════════════════════════════════
 @router.callback_query(F.data.startswith("confirm_pay_"))
 async def confirm_payment(call: CallbackQuery):
-    _, _, payment_id, user_id = call.data.split("_")
-    payment_id, user_id = int(payment_id), int(user_id)
+    parts = call.data.split("_")
+    payment_id, user_id = int(parts[2]), int(parts[3])
 
     async with get_db() as db:
         async with db.execute(
@@ -491,7 +303,6 @@ async def confirm_payment(call: CallbackQuery):
     user = await get_user(user_id)
     lang = user["lang"] if user else "uz"
 
-    # Foydalanuvchiga xabar
     try:
         await call.bot.send_message(
             user_id,
@@ -509,17 +320,17 @@ async def confirm_payment(call: CallbackQuery):
     except Exception:
         pass
 
-    await call.message.edit_caption(
-        caption=f"✅ To'lov tasdiqlandi! Premium {new_until} gacha.",
-    ) if call.message.caption else await call.message.edit_text(
-        f"✅ To'lov tasdiqlandi! Premium {new_until} gacha."
-    )
+    edit_text = f"✅ To'lov tasdiqlandi! Premium {new_until} gacha."
+    if call.message.caption:
+        await call.message.edit_caption(caption=edit_text)
+    else:
+        await call.message.edit_text(edit_text)
 
 
 @router.callback_query(F.data.startswith("reject_pay_"))
 async def reject_payment(call: CallbackQuery):
-    _, _, payment_id, user_id = call.data.split("_")
-    payment_id, user_id = int(payment_id), int(user_id)
+    parts = call.data.split("_")
+    payment_id, user_id = int(parts[2]), int(parts[3])
 
     async with get_db() as db:
         await db.execute(
@@ -542,8 +353,11 @@ async def reject_payment(call: CallbackQuery):
     except Exception:
         pass
 
-    await call.message.edit_text("❌ To'lov rad etildi.") if not call.message.caption \
-        else await call.message.edit_caption(caption="❌ To'lov rad etildi.")
+    edit_text = "❌ To'lov rad etildi."
+    if call.message.caption:
+        await call.message.edit_caption(caption=edit_text)
+    else:
+        await call.message.edit_text(edit_text)
 
 
 # ════════════════════════════════════════════════════════
@@ -552,20 +366,15 @@ async def reject_payment(call: CallbackQuery):
 @router.message(Command("promo"))
 async def promo_start(message: Message, state: FSMContext):
     user = await get_user(message.from_user.id)
-    lang = user["lang"]
-    text = txt(
-        "🎫 Promokodingizni kiriting:",
-        "🎫 Введите ваш промокод:",
-        lang
-    )
-    await message.answer(text)
+    lang = user["lang"] if user else "uz"
+    await message.answer(txt("🎫 Promokodingizni kiriting:", "🎫 Введите ваш промокод:", lang))
     await state.set_state(PromoState.waiting_code)
 
 @router.message(PromoState.waiting_code)
 async def promo_check(message: Message, state: FSMContext):
     user = await get_user(message.from_user.id)
-    lang = user["lang"]
-    code = message.text.strip().upper()
+    lang = user["lang"] if user else "uz"
+    code = (message.text or "").strip().upper()
 
     async with get_db() as db:
         async with db.execute(
@@ -585,7 +394,6 @@ async def promo_check(message: Message, state: FSMContext):
 
         promo = dict(zip([d[0] for d in cur.description], row))
 
-        # Promokod ishlatilganmi?
         async with db.execute(
             "SELECT 1 FROM user_tasks WHERE user_id = ? AND task_id = ?",
             (message.from_user.id, promo["id"] * -1)
@@ -597,7 +405,6 @@ async def promo_check(message: Message, state: FSMContext):
             await message.answer(txt("❌ Bu promokodni allaqachon ishlatgansiz!", "❌ Вы уже использовали этот промокод!", lang))
             return
 
-        # Promokod qo'llash
         if promo["type"] == "premium":
             days = promo["value"]
             new_until = await activate_premium(message.from_user.id, days)
@@ -617,13 +424,13 @@ async def promo_check(message: Message, state: FSMContext):
                 f"💰 <b>{amount} баллов добавлено на счёт!</b>",
                 lang
             )
+        else:
+            result_text = "✅ Promokod qabul qilindi."
 
-        # Ishlatilganlar ro'yxatiga qo'shish
         await db.execute(
             "INSERT OR IGNORE INTO user_tasks (user_id, task_id) VALUES (?, ?)",
             (message.from_user.id, promo["id"] * -1)
         )
-        # uses_left kamaytirish
         await db.execute(
             "UPDATE promo_codes SET uses_left = uses_left - 1 WHERE id = ?",
             (promo["id"],)
@@ -638,42 +445,28 @@ async def promo_check(message: Message, state: FSMContext):
 #  ⏰ PREMIUM ESLATMA (scheduler tomonidan chaqiriladi)
 # ════════════════════════════════════════════════════════
 async def send_premium_reminders(bot) -> None:
-    """
-    3 kun va 1 kun qolganda premium eslatma yuboradi.
-    Faqat notify=1 bo'lgan foydalanuvchilarga xabar ketadi.
-
-    Args:
-        bot: Aiogram Bot obyekti
-    """
     import logging
     logger = logging.getLogger(__name__)
 
     async with get_db() as db:
         for days_left in [3, 1]:
             target_date = (datetime.now() + timedelta(days=days_left)).strftime("%Y-%m-%d")
-
             async with db.execute(
                 """SELECT tg_id, lang, premium_until FROM users
-                   WHERE is_premium = 1
-                     AND premium_until = ?
-                     AND notify = 1""",
+                   WHERE is_premium = 1 AND premium_until = ? AND notify = 1""",
                 (target_date,)
             ) as cur:
                 users = await cur.fetchall()
 
-            # TUZATISH: har bir days_left uchun alohida yuboriladi
-            # (avvalgi kodda faqat oxirgi iteratsiya ishlar edi)
             sent = 0
             for (tg_id, lang, until) in users:
                 text = txt(
                     f"⚠️ <b>Premium eslatma</b>\n\n"
                     f"Sizning Premium obunangiz <b>{days_left} kun</b> ichida tugaydi!\n"
-                    f"📅 Muddat: {until}\n\n"
-                    f"Uzaytirish uchun /premium yozing.",
+                    f"📅 Muddat: {until}\n\nUzaytirish uchun /premium yozing.",
                     f"⚠️ <b>Напоминание о Premium</b>\n\n"
                     f"Ваша Premium подписка истекает через <b>{days_left} дня</b>!\n"
-                    f"📅 До: {until}\n\n"
-                    f"Для продления напишите /premium.",
+                    f"📅 До: {until}\n\nДля продления напишите /premium.",
                     lang
                 )
                 try:
@@ -683,29 +476,17 @@ async def send_premium_reminders(bot) -> None:
                     pass
 
             if users:
-                logger.info(
-                    "Premium eslatma: %d kun qoldi — %d/%d foydalanuvchiga yuborildi.",
-                    days_left, sent, len(users)
-                )
+                logger.info("Premium eslatma: %d kun qoldi — %d/%d ga yuborildi.", days_left, sent, len(users))
 
 
 async def deactivate_expired_premium(bot=None) -> None:
-    """
-    Muddati tugagan premiumlarni o'chiradi va foydalanuvchilarga xabar yuboradi.
-
-    Args:
-        bot: Aiogram Bot obyekti (ixtiyoriy — xabar yuborish uchun)
-    """
     import logging
     logger = logging.getLogger(__name__)
-
     today = datetime.now().strftime("%Y-%m-%d")
 
     async with get_db() as db:
-        # O'chirilayotgan foydalanuvchilarni oldindan olamiz (xabar yuborish uchun)
         async with db.execute(
-            """SELECT tg_id, lang FROM users
-               WHERE is_premium = 1 AND premium_until < ?""",
+            "SELECT tg_id, lang FROM users WHERE is_premium = 1 AND premium_until < ?",
             (today,)
         ) as cur:
             expired_users = await cur.fetchall()
@@ -713,30 +494,36 @@ async def deactivate_expired_premium(bot=None) -> None:
         if not expired_users:
             return
 
-        # Premiumni o'chirish
         await db.execute(
-            """UPDATE users
-               SET is_premium = 0, premium_until = NULL
-               WHERE is_premium = 1 AND premium_until < ?""",
+            "UPDATE users SET is_premium = 0, premium_until = NULL WHERE is_premium = 1 AND premium_until < ?",
             (today,)
         )
         await db.commit()
 
-    logger.info("Premium muddati tugadi: %d foydalanuvchi deaktivatsiya qilindi.", len(expired_users))
+    logger.info("Premium muddati tugadi: %d foydalanuvchi deaktivatsiya.", len(expired_users))
 
-    # Foydalanuvchilarga xabar yuborish (bot berilgan bo'lsa)
     if bot is None:
         return
 
     for (tg_id, lang) in expired_users:
         text = txt(
-            "😔 <b>Premium obunangiz tugadi.</b>\n\n"
-            "Davom ettirish uchun /premium yozing.",
-            "😔 <b>Ваша Premium подписка закончилась.</b>\n\n"
-            "Для продления напишите /premium.",
+            "😔 <b>Premium obunangiz tugadi.</b>\n\nDavom ettirish uchun /premium yozing.",
+            "😔 <b>Ваша Premium подписка закончилась.</b>\n\nДля продления напишите /premium.",
             lang
         )
         try:
             await bot.send_message(tg_id, text, parse_mode="HTML")
         except Exception:
             pass
+
+
+# ── Premiumni bekor qilish ─────────────────────────────
+@router.callback_query(F.data == "cancel_premium")
+async def cancel_premium(call: CallbackQuery):
+    user = await get_user(call.from_user.id)
+    lang = user["lang"] if user else "uz"
+    await call.message.edit_text(
+        txt("❌ Bekor qilindi.", "❌ Отменено.", lang)
+    )
+    await call.answer()
+

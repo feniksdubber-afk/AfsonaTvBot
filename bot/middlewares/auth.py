@@ -3,11 +3,10 @@ AuthMiddleware
 ──────────────
 1. Yangi foydalanuvchini bazaga qo'shadi
 2. Banlangan foydalanuvchini to'xtatadi
-3. `data["lang"]` ni o'rnatadi (SubscriptionMiddleware uchun kerak)
+3. data["lang"] ni o'rnatadi (SubscriptionMiddleware uchun kerak)
 
-Tuzatilgan xatolar:
-  - UnboundLocalError: yangi user uchun `lang` o'zgaruvchisi
-    if/else blokidan tashqarida default sifatida e'lon qilinadi
+TUZATILGAN:
+  - InlineQuery ham qo'llab-quvvatlanadi (main.py da middleware ulanishi kerak)
   - from_user None bo'lsa (bot xabari, kanal post): xavfsiz o'tkazib yuboriladi
   - DB xatosi bo'lsa: handler blokllamaydi, faqat log yoziladi
 """
@@ -17,7 +16,7 @@ import secrets
 from typing import Any, Callable
 
 from aiogram import BaseMiddleware
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineQuery
 
 from bot.database.db import get_db
 
@@ -29,16 +28,14 @@ class AuthMiddleware(BaseMiddleware):
     async def __call__(
         self,
         handler: Callable,
-        event: Message | CallbackQuery,
+        event: Message | CallbackQuery | InlineQuery,
         data: dict,
     ) -> Any:
-        # Bot xabari yoki kanal post uchun from_user bo'lmasligi mumkin
         user = event.from_user
         if user is None:
             return await handler(event, data)
 
-        # Default: o'zbek tili
-        lang = "uz"
+        lang = "uz"  # default
 
         try:
             async with get_db() as db:
@@ -49,7 +46,6 @@ class AuthMiddleware(BaseMiddleware):
                     row = await cursor.fetchone()
 
                 if row is None:
-                    # ── Yangi foydalanuvchi — bazaga qo'shish ──────────
                     ref_code = secrets.token_hex(4).upper()
                     await db.execute(
                         """INSERT OR IGNORE INTO users
@@ -58,25 +54,20 @@ class AuthMiddleware(BaseMiddleware):
                         (user.id, user.username, user.full_name, ref_code),
                     )
                     await db.commit()
-                    # lang allaqachon "uz" ga set qilingan (yuqorida)
                 else:
                     is_banned: int = row[0]
                     lang = row[1] or "uz"
 
                     if is_banned:
+                        # InlineQuery uchun ban xabarini yuborib bo'lmaydi — o'tkazib yuboramiz
                         if isinstance(event, Message):
                             await event.answer("🚫 Siz bloklangansiz.")
                         elif isinstance(event, CallbackQuery):
-                            await event.answer(
-                                "🚫 Siz bloklangansiz.", show_alert=True
-                            )
-                        return  # Banlangan foydalanuvchini to'xtatamiz
+                            await event.answer("🚫 Siz bloklangansiz.", show_alert=True)
+                        return
 
         except Exception as exc:
-            # DB xatosi botni to'xtatmasin — faqat log yozilsin
             logger.error("AuthMiddleware DB xatosi (user_id=%s): %s", user.id, exc)
 
-        # lang ni handler va keyingi middlewarelarga uzatamiz
         data["lang"] = lang
-
         return await handler(event, data)

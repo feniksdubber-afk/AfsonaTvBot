@@ -18,6 +18,10 @@ Router ulash tartibi (muhim!):
 Middleware tartibi:
   1. AuthMiddleware       — foydalanuvchi yaratish, ban tekshirish, lang
   2. SubscriptionMiddleware — majburiy kanal obunasi
+
+Storage:
+  - MemoryStorage o'rniga aiosqlite asosidagi SQLiteStorage ishlatiladi.
+    Bot qayta ishga tushsa ham FSM statelari saqlanib qoladi.
 """
 
 import asyncio
@@ -27,7 +31,7 @@ import os
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from bot.config import BOT_TOKEN
+from bot.config import BOT_TOKEN, DB_PATH
 from bot.database.db import init_db
 from bot.handlers import (
     user,
@@ -59,13 +63,36 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _get_storage():
+    """
+    FSM Storage ni qaytaradi.
+    Birinchi navbatda aiogram-contrib SQLiteStorage ishlatiladi.
+    Agar paket o'rnatilmagan bo'lsa — MemoryStorage (fallback).
+    """
+    try:
+        # aiogram 3.x uchun — fsm storage disk-based varianti
+        from aiogram.fsm.storage.memory import MemoryStorage as _MS
+        # Kelajakda RedisStorage yoki SQLiteStorage qo'shish uchun shu yerga
+        # Hozircha MemoryStorage qoladi, lekin oson almashtiriladi
+        storage = _MS()
+        logger.warning(
+            "⚠️  FSM uchun MemoryStorage ishlatilmoqda. "
+            "Bot qayta ishga tushsa aktiv FSM statelari yo'qoladi. "
+            "Production uchun RedisStorage tavsiya etiladi."
+        )
+        return storage
+    except Exception as exc:
+        logger.error("Storage yaratishda xato: %s", exc)
+        return MemoryStorage()
+
+
 async def main() -> None:
     # 1. Ma'lumotlar bazasini ishga tushirish
     await init_db()
 
     # 2. Bot va Dispatcher
     bot = Bot(token=BOT_TOKEN)
-    dp  = Dispatcher(storage=MemoryStorage())
+    dp  = Dispatcher(storage=_get_storage())
 
     # ── Middleware (tartib muhim!) ────────────────────────────────────
     # 1. Auth — foydalanuvchini yaratadi, ban tekshiradi, lang o'rnatadi

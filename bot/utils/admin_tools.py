@@ -1,4 +1,3 @@
-```python
 import random
 import aiosqlite
 
@@ -20,5 +19,3 @@ async def generate_unique_code(db: aiosqlite.Connection) -> str:
             
         if not movie and not series:
             return code
-
-```

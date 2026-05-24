@@ -1,3 +1,4 @@
+```python
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart, Command
@@ -22,23 +23,26 @@ async def cmd_start_deeplink_process(message: Message):
             await message.answer("❌ Kontent topilmadi yoki o'chirilgan!")
             return
             
-        # Ustunlarni nomlash
-        cols = ["id", "code", "title_uz", "title_ru", "country", "year", "genres", "description", "file_id", "poster_file_id", "is_premium", "status"]
+        # Ustunlarni xavfsiz moslash
+        cols = [d[0] for d in (await get_db().execute("PRAGMA table_info(movies)")).fetchall()]
         m_dict = dict(zip(cols, movie))
         
         # Soft-delete va Arxiv tekshirish
-        if m_dict["status"] == "deleted":
+        if m_dict.get("status") == "deleted":
             await message.answer("❌ Kontent topilmadi!")
             return
-        if m_dict["status"] == "archived":
+        if m_dict.get("status") == "archived":
             await message.answer("⛔ Bu kontent vaqtinchalik arxivda.")
             return
 
+        # BACKWARD COMPATIBILITY: Eski va yangi title ustunlarini xavfsiz tekshirib nomlash
+        title_display = m_dict.get('title_uz') or m_dict.get('title') or "Nomsiz kino"
+
         caption = (
-            f"🎬 <b>{m_dict['title_uz']}</b> ({m_dict['year']})\n"
-            f"🎭 {m_dict['genres']}\n"
-            f"🌍 {m_dict['country']}\n\n"
-            f"🍿 {m_dict['description']}"
+            f"🎬 <b>{title_display}</b> ({m_dict.get('year', '?')})\n"
+            f"🎭 {m_dict.get('genres') or m_dict.get('genre', '')}\n"
+            f"🌍 {m_dict.get('country', '')}\n\n"
+            f"🍿 {m_dict.get('description', '')}"
         )
         
         # Views sonini oshirish
@@ -112,7 +116,6 @@ async def cb_show_season_episodes(call: CallbackQuery):
     row_btns = []
     for i, ep in enumerate(episodes):
         row_btns.append(InlineKeyboardButton(text=f"{ep[0]}-qism", callback_data=f"play_ep_{ep[1]}"))
-        # Har 3 ta tugmani bitta qatorga jamlaymiz
         if len(row_btns) == 3 or i == len(episodes) - 1:
             kb_buttons.append(row_btns)
             row_btns = []
@@ -179,3 +182,5 @@ async def cb_back_to_series_menu(call: CallbackQuery):
     )
     await call.message.edit_caption(caption=caption, reply_markup=kb, parse_mode="HTML")
     await call.answer()
+
+```

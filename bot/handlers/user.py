@@ -62,6 +62,20 @@ async def cmd_start(message: Message):
                     )
                     await db.commit()
 
+    # ── movie_ deep link — inline qidiruvdan kelgan ────────────────
+    args_list = message.text.split() if message.text else []
+    if len(args_list) > 1 and args_list[1].startswith("movie_"):
+        code = args_list[1][6:]  # "movie_" ni olib tashlash
+        from bot.handlers.inline_search import handle_movie_deeplink
+        await handle_movie_deeplink(message, code)
+        return
+
+    # ── premium deep link ────────────────────────────────────────────
+    if len(args_list) > 1 and args_list[1] == "premium":
+        from bot.handlers.premium import show_premium_menu
+        await show_premium_menu(message)
+        return
+
     greeting = txt(
         f"👋 Xush kelibsiz, <b>{message.from_user.first_name}</b>!\n\n"
         "🎬 Bu bot orqali kino va seriallarni tomosha qilishingiz mumkin.\n"

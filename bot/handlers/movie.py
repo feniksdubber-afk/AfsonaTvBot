@@ -499,3 +499,122 @@ async def similar_movies(call: CallbackQuery):
 async def back_movie(call: CallbackQuery):
     await call.message.delete()
     await call.answer()
+
+
+# ── 🎬 Kinolar tugmasi ─────────────────────────────────────────────
+@router.message(F.text.in_(["🎬 Kinolar", "🎬 Фильмы"]))
+async def show_movies_menu(message: Message):
+    user = await get_user(message.from_user.id)
+    lang = user["lang"] if user else "uz"
+
+    async with get_db() as db:
+        # Tavsiya etilgan kinolar
+        async with db.execute(
+            "SELECT code, title, year, is_premium FROM movies WHERE status = 'active' ORDER BY views DESC LIMIT 10"
+        ) as cur:
+            rows = await cur.fetchall()
+
+    if not rows:
+        text = (
+            "🎬 <b>Kinolar</b>\n\nHozircha kinolar yo'q.\nTez kunda qo'shiladi!"
+            if lang == "uz" else
+            "🎬 <b>Фильмы</b>\n\nПока фильмов нет.\nСкоро добавим!"
+        )
+        await message.answer(text, parse_mode="HTML")
+        return
+
+    lines = []
+    for r in rows:
+        icon = "⭐" if r[3] else "🎬"
+        year = f"({r[2]})" if r[2] else ""
+        lines.append(f"{icon} <code>{r[0]}</code> — {r[1]} {year}")
+
+    header = (
+        "🎬 <b>Eng ko'p ko'rilgan kinolar</b>\n\n"
+        if lang == "uz" else
+        "🎬 <b>Самые просматриваемые фильмы</b>\n\n"
+    )
+    footer = (
+        "\n\n📌 Kino kodini yuboring yoki 🔍 Qidirish tugmasini bosing."
+        if lang == "uz" else
+        "\n\n📌 Отправьте код фильма или нажмите 🔍 Поиск."
+    )
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="🏆 TOP kinolar" if lang == "uz" else "🏆 ТОП фильмов",
+                callback_data="top_movies_views"
+            ),
+            InlineKeyboardButton(
+                text="⭐ Reytingli" if lang == "uz" else "⭐ По рейтингу",
+                callback_data="top_movies_rating"
+            ),
+        ]
+    ])
+
+    await message.answer(
+        header + "\n".join(lines) + footer,
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
+
+# ── TOP kinolar callback ───────────────────────────────────────────
+@router.callback_query(F.data.in_(["top_movies_views", "top_movies_rating"]))
+async def top_movies(call: CallbackQuery):
+    user = await get_user(call.from_user.id)
+    lang = user["lang"] if user else "uz"
+    by_rating = call.data == "top_movies_rating"
+
+    order = "rating DESC" if by_rating else "views DESC"
+
+    async with get_db() as db:
+        async with db.execute(
+            f"SELECT code, title, year, is_premium, views, rating FROM movies WHERE status = 'active' ORDER BY {order} LIMIT 10"
+        ) as cur:
+            rows = await cur.fetchall()
+
+    if not rows:
+        await call.answer(
+            "Kinolar yo'q" if lang == "uz" else "Фильмов нет",
+            show_alert=True
+        )
+        return
+
+    lines = []
+    for i, r in enumerate(rows, 1):
+        icon = "⭐" if r[3] else "🎬"
+        year = f"({r[2]})" if r[2] else ""
+        stat = f"⭐{r[5]:.1f}" if by_rating else f"👁{r[4]:,}"
+        lines.append(f"{i}. {icon} <code>{r[0]}</code> — {r[1]} {year} {stat}")
+
+    header = (
+        "🏆 <b>TOP 10 — Reytingli kinolar</b>\n\n"
+        if by_rating and lang == "uz" else
+        "🏆 <b>TOP 10 — Рейтинговые фильмы</b>\n\n"
+        if by_rating else
+        "🏆 <b>TOP 10 — Ko'p ko'rilgan</b>\n\n"
+        if lang == "uz" else
+        "🏆 <b>TOP 10 — Самые просматриваемые</b>\n\n"
+    )
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="👁 Ko'p ko'rilgan" if lang == "uz" else "👁 По просмотрам",
+            callback_data="top_movies_views"
+        ),
+        InlineKeyboardButton(
+            text="⭐ Reytingli" if lang == "uz" else "⭐ По рейтингу",
+            callback_data="top_movies_rating"
+        ),
+    ]])
+
+    await call.message.edit_text(
+        header + "\n".join(lines),
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+    await call.answer()

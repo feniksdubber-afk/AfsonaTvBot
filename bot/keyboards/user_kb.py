@@ -1,5 +1,7 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
+# ==================== REPLIES (ASOSIY MENYULAR) ====================
+
 def main_menu(lang: str = "uz") -> ReplyKeyboardMarkup:
     texts = {
         "uz": ["🎬 Kinolar", "⭐ Premium", "👤 Profil", "🔍 Qidirish", "📋 So'rov", "📞 Support"],
@@ -14,6 +16,8 @@ def main_menu(lang: str = "uz") -> ReplyKeyboardMarkup:
         ],
         resize_keyboard=True
     )
+
+# ==================== INLINES (PROFIL & SOZLAMALAR) ====================
 
 def profile_kb(lang: str = "uz") -> InlineKeyboardMarkup:
     if lang == "uz":
@@ -59,3 +63,60 @@ def back_kb(cb: str = "back_profile") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="◀️ Orqaga", callback_data=cb)]
     ])
+
+# ==================== INLINES (KINO & INTERAKTIV) ====================
+
+def movie_kb(movie_id: int, is_favorite: bool, lang: str = "uz") -> InlineKeyboardMarkup:
+    fav_text = (
+        ("❤️ Sevimlilardan olib tashlash" if is_favorite else "🤍 Sevimlilarga qo'shish")
+        if lang == "uz" else
+        ("❤️ Убрать из избранного" if is_favorite else "🤍 Добавить в избранное")
+    )
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⭐ Reyting", callback_data=f"rate_{movie_id}"),
+            InlineKeyboardButton(text="💬 Izohlar", callback_data=f"comments_{movie_id}"),
+        ],
+        [InlineKeyboardButton(text=fav_text, callback_data=f"fav_{movie_id}")],
+        [
+            InlineKeyboardButton(text="📤 Ulashish", callback_data=f"share_{movie_id}"),
+            InlineKeyboardButton(text="🎬 O'xshash", callback_data=f"similar_{movie_id}"),
+        ],
+    ])
+
+def rating_kb(movie_id: int) -> InlineKeyboardMarkup:
+    stars = ["⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"]
+    buttons = [
+        [InlineKeyboardButton(text=s, callback_data=f"setrate_{movie_id}_{i+1}")]
+        for i, s in enumerate(stars)
+    ]
+    buttons.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data=f"back_movie_{movie_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def comments_kb(movie_id: int, comments: list, lang: str = "uz") -> InlineKeyboardMarkup:
+    buttons = []
+    for c in comments:
+        buttons.append([
+            InlineKeyboardButton(text=f"👍 {c['likes']}", callback_data=f"like_{c['id']}"),
+            InlineKeyboardButton(text=f"👎 {c['dislikes']}", callback_data=f"dislike_{c['id']}"),
+        ])
+    add_text = "✏️ Izoh qoldirish" if lang == "uz" else "✏️ Написать комментарий"
+    buttons.append([InlineKeyboardButton(text=add_text, callback_data=f"addcomment_{movie_id}")])
+    buttons.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data=f"back_movie_{movie_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def series_nav_kb(code_base: str, season: int, episode: int,
+                  has_next: bool, has_prev: bool) -> InlineKeyboardMarkup:
+    buttons = []
+    nav = []
+    if has_prev:
+        nav.append(InlineKeyboardButton(
+            text="⬅️ Oldingi", callback_data=f"ep_{code_base}_{season}_{episode-1}"
+        ))
+    if has_next:
+        nav.append(InlineKeyboardButton(
+            text="Keyingi ➡️", callback_data=f"ep_{code_base}_{season}_{episode+1}"
+        ))
+    if nav:
+        buttons.append(nav)
+    return InlineKeyboardMarkup(inline_keyboard=buttons)

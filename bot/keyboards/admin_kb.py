@@ -1,16 +1,45 @@
+```python
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 def admin_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🎬 Kino qo'shish"), KeyboardButton(text="📋 Kinolar ro'yxati")],
-            [KeyboardButton(text="📢 Broadcast"),     KeyboardButton(text="👥 Foydalanuvchilar")],
-            [KeyboardButton(text="📊 Statistika"),    KeyboardButton(text="📥 Eksport CSV")],
+            [KeyboardButton(text="🎬 Kino qo'shish"), KeyboardButton(text="✏️ Kontentni tahrirlash")],
+            [KeyboardButton(text="📋 Kinolar ro'yxati"), KeyboardButton(text="📢 Broadcast")],
+            [KeyboardButton(text="👥 Foydalanuvchilar"), KeyboardButton(text="📊 Statistika")],
             [KeyboardButton(text="🔧 Sozlamalar"),    KeyboardButton(text="📨 Kino so'rovlar")],
             [KeyboardButton(text="🏠 Bosh menyu")],
         ],
         resize_keyboard=True
     )
+
+def content_type_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🎞 Film", callback_data="add_type_film"),
+            InlineKeyboardButton(text="📺 Serial", callback_data="add_type_series")
+        ],
+        [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="cancel_admin_fsm")]
+    ])
+
+def is_premium_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🟢 Ha (Premium)", callback_data="premium_yes"),
+            InlineKeyboardButton(text="⚪ Yo'q (Tekin)", callback_data="premium_no")
+        ]
+    ])
+
+def series_control_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Keyingi faslga o'tish", callback_data="series_next_season")],
+        [InlineKeyboardButton(text="✅ Yuklashni yakunlash", callback_data="series_finish")]
+    ])
+
+def cancel_fsm_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Jarayonni bekor qilish", callback_data="cancel_admin_fsm")]
+    ])
 
 def movie_manage_kb(movie_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -62,3 +91,5 @@ def requests_kb(req_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="✅ Qabul",   callback_data=f"req_accept_{req_id}"),
         InlineKeyboardButton(text="❌ Rad etish", callback_data=f"req_reject_{req_id}"),
     ]])
+
+```

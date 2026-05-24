@@ -826,16 +826,18 @@ async def admin_user_detail(message: Message):
             cols = [d[0] for d in cur.description]
             u = dict(zip(cols, row))
 
+    prem_label = "Ha" if u["is_premium"] else "Yoq"
+    ban_label  = "Ha" if u["is_banned"]  else "Yoq"
     text = (
         f"👤 <b>Foydalanuvchi</b>\n\n"
         f"🆔 ID: <code>{u['tg_id']}</code>\n"
         f"👨 Ism: {u['full_name']}\n"
         f"@username: {u.get('username') or '—'}\n"
         f"🌐 Til: {u['lang']}\n"
-        f"⭐ Premium: {'Ha ✅' if u['is_premium'] else 'Yo\\'q'}\n"
+        f"⭐ Premium: {prem_label}\n"
         f"📅 Premium muddat: {u.get('premium_until') or '—'}\n"
         f"💰 Balans: {u['balance']} ball\n"
-        f"🚫 Ban: {'Ha' if u['is_banned'] else 'Yo\\'q'}\n"
+        f"🚫 Ban: {ban_label}\n"
         f"📅 Qo'shildi: {u.get('created_at', '?')[:10]}"
     )
     await message.answer(

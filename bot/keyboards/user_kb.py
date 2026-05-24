@@ -127,17 +127,19 @@ def premium_tariffs_kb(tariffs: list, lang: str = "uz") -> InlineKeyboardMarkup:
     buttons = []
     for t in tariffs:
         label = f"⭐ {t['name']} — {t['price']:,} so'm ({t['duration']} kun)"
+        # Tarif tanlash — to'g'ridan-to'g'ri karta to'loviga o'tadi
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"buy_tariff_{t['id']}")])
     cancel = "❌ Bekor qilish" if lang == "uz" else "❌ Отмена"
     buttons.append([InlineKeyboardButton(text=cancel, callback_data="cancel_premium")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def payment_method_kb(tariff_id: int, lang: str = "uz") -> InlineKeyboardMarkup:
+    # Faqat karta (manual) to'lov — Click/Payme o'chirilgan
+    pay_text = "💳 Karta orqali to'lash" if lang == "uz" else "💳 Оплатить картой"
+    back_text = "◀️ Orqaga" if lang == "uz" else "◀️ Назад"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Click",  callback_data=f"pay_click_{tariff_id}")],
-        [InlineKeyboardButton(text="💳 Payme",  callback_data=f"pay_payme_{tariff_id}")],
-        [InlineKeyboardButton(text="💳 Karta (manual)", callback_data=f"pay_card_{tariff_id}")],
-        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="show_premium")],
+        [InlineKeyboardButton(text=pay_text, callback_data=f"buy_tariff_{tariff_id}")],
+        [InlineKeyboardButton(text=back_text, callback_data="show_premium")],
     ])
 
 def payment_confirm_kb(payment_id: int, lang: str = "uz") -> InlineKeyboardMarkup:

@@ -1,4 +1,3 @@
-```python
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 def admin_menu() -> ReplyKeyboardMarkup:
@@ -91,5 +90,3 @@ def requests_kb(req_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="✅ Qabul",   callback_data=f"req_accept_{req_id}"),
         InlineKeyboardButton(text="❌ Rad etish", callback_data=f"req_reject_{req_id}"),
     ]])
-
-```

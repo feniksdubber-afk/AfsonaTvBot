@@ -38,7 +38,7 @@ def is_admin(user_id: int) -> bool:
     return user_id in ADMINS
 
 async def get_user(tg_id: int) -> dict | None:
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT * FROM users WHERE tg_id = ?", (tg_id,)
         ) as cur:
@@ -58,7 +58,7 @@ async def add_points(user_id: int, amount: int, reason: str = "") -> int:
     Foydalanuvchiga ball qo'shadi va yangi balansni qaytaradi.
     Shuningdek point_log jadvaliga yozadi.
     """
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute(
             "UPDATE users SET balance = balance + ? WHERE tg_id = ?",
             (amount, user_id)
@@ -77,7 +77,7 @@ async def add_points(user_id: int, amount: int, reason: str = "") -> int:
 async def get_active_tournament() -> dict | None:
     """Hozirda faol turnirni qaytaradi."""
     now = datetime.utcnow().isoformat()
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             """SELECT * FROM tournaments
                WHERE status = 'active'
@@ -97,7 +97,7 @@ async def tournament_add_points(user_id: int, amount: int):
     t = await get_active_tournament()
     if not t:
         return
-    async with await get_db() as db:
+    async with get_db() as db:
         # Mavjudligini tekshirish
         async with db.execute(
             "SELECT id, points FROM tournament_participants WHERE tournament_id=? AND user_id=?",
@@ -122,7 +122,7 @@ async def complete_task(user_id: int, task_id: int) -> tuple[bool, int]:
     Vazifani bajargan deb belgilaydi.
     (yangi_mi, ball) qaytaradi.
     """
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT 1 FROM user_tasks WHERE user_id=? AND task_id=?",
             (user_id, task_id)
@@ -297,8 +297,9 @@ async def cb_my_points(call: CallbackQuery):
         await call.answer("Xatolik", show_alert=True)
         return
 
+    # So'nggi 5 ta log
     logs = []
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT amount, reason, created_at FROM point_log "
             "WHERE user_id=? ORDER BY id DESC LIMIT 5",
@@ -314,22 +315,20 @@ async def cb_my_points(call: CallbackQuery):
         date = created_at[:10] if created_at else ""
         log_text += f"\n  {sign}{amount} — {reason} ({date})"
 
-    empty_uz = "\n  (bo'sh)"
-    empty_ru = "\n  (пусто)"
-
     msg = txt(
         f"💰 <b>Sizning ballingiz</b>\n\n"
         f"🏅 Jami ball: <b>{user['balance']}</b>\n"
-        f"\n📜 <b>Oxirgi operatsiyalar:</b>{log_text or empty_uz}",
+        f"\n📜 <b>Oxirgi operatsiyalar:</b>{log_text or chr(10) + '  (bo'sh)'}",
 
         f"💰 <b>Ваши баллы</b>\n\n"
         f"🏅 Всего баллов: <b>{user['balance']}</b>\n"
-        f"\n📜 <b>Последние операции:</b>{log_text or empty_ru}",
+        f"\n📜 <b>Последние операции:</b>{log_text or chr(10) + '  (пусто)'}",
         lang
     )
     await call.message.edit_text(msg, reply_markup=back_to_game_kb(lang), parse_mode="HTML")
     await call.answer()
-    
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  LIDERLAR TAXTASI
 # ═══════════════════════════════════════════════════════════════════
@@ -373,7 +372,7 @@ async def _leaderboard_text(scope: str, user_id: int, lang: str) -> str:
 
     medals = ["🥇", "🥈", "🥉"] + ["🏅"] * 7
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(query, args) as cur:
             rows = await cur.fetchall()
 
@@ -402,7 +401,7 @@ async def _leaderboard_text(scope: str, user_id: int, lang: str) -> str:
             rank_q = None  # murakkab, oson yo'l bilan skip
 
         if rank_q:
-            async with await get_db() as db:
+            async with get_db() as db:
                 async with db.execute(rank_q, (user_id,)) as cur:
                     r = await cur.fetchone()
                     if r:
@@ -455,7 +454,7 @@ async def cb_tasks_list(call: CallbackQuery):
     lang = await get_user_lang(call.from_user.id)
     uid  = call.from_user.id
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT id, title, description, reward, type, target_url "
             "FROM tasks WHERE is_active=1 ORDER BY id"
@@ -543,7 +542,7 @@ async def cb_tournament_info(call: CallbackQuery):
         return
 
     # Turnir qatnashchilari TOP-5
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             """SELECT u.full_name, tp.points
                FROM tournament_participants tp
@@ -608,7 +607,7 @@ async def admin_tasks_cmd(message: Message):
     if not is_admin(message.from_user.id):
         return
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT id, title, reward, type, is_active FROM tasks ORDER BY id DESC LIMIT 20"
         ) as cur:
@@ -696,7 +695,7 @@ async def task_state_url(message: Message, state: FSMContext):
 
 async def _save_task(message: Message, state: FSMContext):
     data = await state.get_data()
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute(
             "INSERT INTO tasks (title, description, reward, type, target_url) VALUES (?,?,?,?,?)",
             (data["title"], data["description"], data["reward"],
@@ -716,7 +715,7 @@ async def cb_task_toggle(call: CallbackQuery):
     if not is_admin(call.from_user.id):
         return
     task_id = int(call.data.split("_")[-1])
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute(
             "UPDATE tasks SET is_active = 1 - is_active WHERE id=?", (task_id,)
         )
@@ -745,7 +744,7 @@ async def cb_task_delete(call: CallbackQuery):
     if not is_admin(call.from_user.id):
         return
     task_id = int(call.data.split("_")[-1])
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute("DELETE FROM tasks WHERE id=?", (task_id,))
         await db.execute("DELETE FROM user_tasks WHERE task_id=?", (task_id,))
         await db.commit()
@@ -828,7 +827,7 @@ async def tourn_state_top_n(message: Message, state: FSMContext):
     start_at = datetime.utcnow()
     end_at   = start_at + timedelta(days=data["duration"])
 
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute(
             """INSERT INTO tournaments
                (title, description, prizes, top_n, status, start_at, end_at)
@@ -879,7 +878,7 @@ async def cb_tournament_confirm_end(call: CallbackQuery):
     t_id = int(call.data.split("_")[-1])
 
     # TOP-3 ni chiqarish va statusni o'zgartirish
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             """SELECT u.tg_id, u.full_name, tp.points
                FROM tournament_participants tp

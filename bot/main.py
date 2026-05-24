@@ -27,7 +27,7 @@ import logging
 import os
 
 from aiogram import Bot, Dispatcher
-from aiogram_sqlite_storage import SQLiteStorage
+from aiogram_sqlite_storage.sqlitestore import SQLStorage
 
 from bot.config import BOT_TOKEN, DB_PATH
 from bot.database.db import init_db
@@ -70,7 +70,7 @@ async def main() -> None:
 
     # 2. Bot va Dispatcher — SQLiteStorage bilan
     bot = Bot(token=BOT_TOKEN)
-    dp  = Dispatcher(storage=SQLiteStorage(FSM_DB_PATH))
+    dp  = Dispatcher(storage=SQLStorage(FSM_DB_PATH))
 
     # ── Middleware (tartib muhim!) ────────────────────────────────────
     dp.message.middleware(AuthMiddleware())

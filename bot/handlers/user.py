@@ -240,7 +240,8 @@ async def _send_movie_by_code(message: Message, code: str, lang: str = "uz"):
     await message.answer_video(
         video=m["file_id"],
         caption=caption,
-        parse_mode="HTML"
+        parse_mode="HTML",
+        protect_content=True
     )
 
 
@@ -327,7 +328,8 @@ async def _send_series_by_code(message: Message, code: str, lang: str = "uz"):
             photo=s["poster_file_id"],
             caption=caption,
             reply_markup=kb,
-            parse_mode="HTML"
+            parse_mode="HTML",
+            protect_content=True
         )
     else:
         await message.answer(caption, reply_markup=kb, parse_mode="HTML")
@@ -711,15 +713,28 @@ async def support_save(message: Message, state: FSMContext):
 
     msg_text = message.text or "[Matn yo'q]"
 
-    admin_text = (
-        f"📞 <b>Support xabari</b>\n\n"
-        f"👤 {message.from_user.full_name} "
-        f"(<code>{message.from_user.id}</code>)\n"
-        f"💬 {msg_text}"
-    )
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    user_id = message.from_user.id
+
     for admin_id in ADMINS:
         try:
-            await message.bot.send_message(admin_id, admin_text, parse_mode="HTML")
+            reply_kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(
+                    text="💬 Javob berish",
+                    callback_data=f"support_reply_{user_id}"
+                )
+            ]])
+            admin_text = (
+                f"📞 <b>Support xabari</b>\n\n"
+                f"👤 {message.from_user.full_name} "
+                f"(<code>{user_id}</code>)\n"
+                f"💬 {msg_text}"
+            )
+            await message.bot.send_message(
+                admin_id, admin_text,
+                reply_markup=reply_kb,
+                parse_mode="HTML"
+            )
         except Exception:
             pass
 
@@ -906,3 +921,106 @@ async def search_process(message: Message, state: FSMContext):
         + hint
     )
     await message.answer(text, parse_mode="HTML")
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  🎬 KINO KODI — Foydalanuvchi to'g'ridan kod yozsa
+# ══════════════════════════════════════════════════════════════════════
+@router.message(F.text.regexp(r'^\d{3,5}$'))
+async def handle_movie_code(message: Message):
+    """
+    Foydalanuvchi 3-5 xonali raqam yuborganda kino/serial qidiradi.
+    Masalan: 847, 3291, 58043
+    """
+    code = message.text.strip()
+    user = await get_user(message.from_user.id)
+    lang = user["lang"] if user else "uz"
+
+    # Avval movie jadvalida qidirish
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT * FROM movies WHERE code = ? AND status = 'active'", (code,)
+        ) as cur:
+            row = await cur.fetchone()
+            if row:
+                cols = [d[0] for d in cur.description]
+                movie = dict(zip(cols, row))
+
+        if not row:
+            # Series jadvalida qidirish
+            async with db.execute(
+                "SELECT * FROM series WHERE code = ? AND status = 'active'", (code,)
+            ) as cur:
+                row = await cur.fetchone()
+                if row:
+                    cols = [d[0] for d in cur.description]
+                    series = dict(zip(cols, row))
+                else:
+                    series = None
+        else:
+            series = None
+
+    if movie:
+        await _send_movie_by_code(message, code, lang)
+    elif series:
+        await _send_series_by_code(message, code, lang)
+    else:
+        await message.answer(
+            txt(
+                f"❌ <b>{code}</b> kodi bo'yicha kino topilmadi.\n\n"
+                "🔍 Qidirish uchun: /search",
+                f"❌ По коду <b>{code}</b> ничего не найдено.\n\n"
+                "🔍 Поиск: /search",
+                lang
+            ),
+            parse_mode="HTML"
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  📞 SUPPORT — Admin javob berishi
+# ══════════════════════════════════════════════════════════════════════
+class SupportReplyState(StatesGroup):
+    waiting_reply = State()
+
+
+@router.callback_query(F.data.startswith("support_reply_"))
+async def support_reply_start(call: CallbackQuery, state: FSMContext):
+    from bot.config import ADMINS
+    if call.from_user.id not in ADMINS:
+        await call.answer("❌ Ruxsat yo'q!", show_alert=True)
+        return
+
+    user_id = int(call.data.split("_")[2])
+    await state.update_data(support_target=user_id)
+    await state.set_state(SupportReplyState.waiting_reply)
+    await call.message.answer(
+        f"💬 <code>{user_id}</code> ga javob yozing:",
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+
+@router.message(SupportReplyState.waiting_reply)
+async def support_reply_send(message: Message, state: FSMContext):
+    from bot.config import ADMINS
+    if message.from_user.id not in ADMINS:
+        return
+
+    sd = await state.get_data()
+    target = sd.get("support_target")
+    await state.clear()
+
+    if not target:
+        await message.answer("❌ Xatolik!")
+        return
+
+    try:
+        await message.bot.send_message(
+            target,
+            f"📞 <b>Admin javobi:</b>\n\n{message.text}",
+            parse_mode="HTML"
+        )
+        await message.answer("✅ Javob yuborildi!")
+    except Exception as e:
+        await message.answer(f"❌ Yuborishda xato: {e}")

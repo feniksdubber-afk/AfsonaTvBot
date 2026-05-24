@@ -22,7 +22,7 @@ class SearchState(StatesGroup):
 
 # ── Helpers ────────────────────────────────────────────
 async def get_user(tg_id: int) -> dict | None:
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT * FROM users WHERE tg_id = ?", (tg_id,)
         ) as cur:
@@ -32,7 +32,7 @@ async def get_user(tg_id: int) -> dict | None:
     return None
 
 async def get_movie_by_code(code: str) -> dict | None:
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT * FROM movies WHERE code = ? AND status = 'active'", (code,)
         ) as cur:
@@ -42,7 +42,7 @@ async def get_movie_by_code(code: str) -> dict | None:
     return None
 
 async def is_favorite(user_id: int, movie_id: int) -> bool:
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT 1 FROM favorites WHERE user_id = ? AND movie_id = ?",
             (user_id, movie_id)
@@ -50,7 +50,7 @@ async def is_favorite(user_id: int, movie_id: int) -> bool:
             return await cur.fetchone() is not None
 
 async def add_watch_history(user_id: int, movie_id: int):
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute(
             "INSERT INTO watch_history (user_id, movie_id) VALUES (?, ?)",
             (user_id, movie_id)
@@ -148,7 +148,7 @@ async def find_movie_by_code(message: Message):
         episode = movie["episode"]
         code_base = code[:-len(str(episode))] if str(episode) in code else code
 
-        async with await get_db() as db:
+        async with get_db() as db:
             async with db.execute(
                 "SELECT 1 FROM movies WHERE code = ? AND status = 'active'",
                 (f"{code_base}{episode+1}",)
@@ -215,7 +215,7 @@ async def search_movies(message: Message, state: FSMContext):
     lang = user["lang"]
     query = f"%{message.text.strip()}%"
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             """SELECT code, title, year, is_premium FROM movies
                WHERE (title LIKE ? OR title_ru LIKE ?) AND status = 'active'
@@ -252,7 +252,7 @@ async def toggle_favorite(call: CallbackQuery):
     lang = user["lang"]
     fav = await is_favorite(call.from_user.id, movie_id)
 
-    async with await get_db() as db:
+    async with get_db() as db:
         if fav:
             await db.execute(
                 "DELETE FROM favorites WHERE user_id = ? AND movie_id = ?",
@@ -290,7 +290,7 @@ async def set_rating(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     lang = user["lang"]
 
-    async with await get_db() as db:
+    async with get_db() as db:
         # Foydalanuvchi reytingini saqlash (yangi jadval kerak bo'lsa ham avg hisoblaymiz)
         await db.execute(
             """INSERT OR REPLACE INTO user_ratings (user_id, movie_id, stars)
@@ -323,7 +323,7 @@ async def show_comments(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     lang = user["lang"]
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             """SELECT c.id, c.text, c.likes, c.dislikes, u.full_name
                FROM comments c JOIN users u ON c.user_id = u.tg_id
@@ -391,7 +391,7 @@ async def save_comment(message: Message, state: FSMContext):
         await message.answer(text)
         return
 
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute(
             "INSERT INTO comments (user_id, movie_id, text) VALUES (?, ?, ?)",
             (message.from_user.id, movie_id, message.text)
@@ -407,7 +407,7 @@ async def save_comment(message: Message, state: FSMContext):
 @router.callback_query(F.data.startswith("like_"))
 async def like_comment(call: CallbackQuery):
     comment_id = int(call.data.split("_")[1])
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute(
             "UPDATE comments SET likes = likes + 1 WHERE id = ?", (comment_id,)
         )
@@ -417,7 +417,7 @@ async def like_comment(call: CallbackQuery):
 @router.callback_query(F.data.startswith("dislike_"))
 async def dislike_comment(call: CallbackQuery):
     comment_id = int(call.data.split("_")[1])
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute(
             "UPDATE comments SET dislikes = dislikes + 1 WHERE id = ?", (comment_id,)
         )
@@ -432,7 +432,7 @@ async def share_movie(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     lang = user["lang"]
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT code, title FROM movies WHERE id = ?", (movie_id,)
         ) as cur:
@@ -460,7 +460,7 @@ async def similar_movies(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     lang = user["lang"]
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT genre FROM movies WHERE id = ?", (movie_id,)
         ) as cur:
@@ -471,7 +471,7 @@ async def similar_movies(call: CallbackQuery):
         return
 
     genre = row[0]
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             """SELECT code, title, rating FROM movies
                WHERE genre = ? AND id != ? AND status = 'active'

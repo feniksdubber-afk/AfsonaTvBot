@@ -3,8 +3,8 @@ import aiosqlite
 from bot.config import DB_PATH
 from bot.database.models import _create_tables
 
-async def get_db():
-    return await aiosqlite.connect(DB_PATH)
+def get_db():
+    return aiosqlite.connect(DB_PATH)
 
 async def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)

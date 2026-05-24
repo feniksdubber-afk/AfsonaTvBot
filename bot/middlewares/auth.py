@@ -4,15 +4,24 @@ AuthMiddleware
 1. Yangi foydalanuvchini bazaga qo'shadi
 2. Banlangan foydalanuvchini to'xtatadi
 3. `data["lang"]` ni o'rnatadi (SubscriptionMiddleware uchun kerak)
+
+Tuzatilgan xatolar:
+  - UnboundLocalError: yangi user uchun `lang` o'zgaruvchisi
+    if/else blokidan tashqarida default sifatida e'lon qilinadi
+  - from_user None bo'lsa (bot xabari, kanal post): xavfsiz o'tkazib yuboriladi
+  - DB xatosi bo'lsa: handler blokllamaydi, faqat log yoziladi
 """
 
+import logging
 import secrets
-from typing import Callable, Any, Awaitable
+from typing import Any, Callable
 
 from aiogram import BaseMiddleware
 from aiogram.types import Message, CallbackQuery
 
 from bot.database.db import get_db
+
+logger = logging.getLogger(__name__)
 
 
 class AuthMiddleware(BaseMiddleware):
@@ -21,38 +30,53 @@ class AuthMiddleware(BaseMiddleware):
         self,
         handler: Callable,
         event: Message | CallbackQuery,
-        data: dict
+        data: dict,
     ) -> Any:
+        # Bot xabari yoki kanal post uchun from_user bo'lmasligi mumkin
         user = event.from_user
+        if user is None:
+            return await handler(event, data)
 
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT is_banned, lang FROM users WHERE tg_id = ?", (user.id,)
-            ) as cursor:
-                row = await cursor.fetchone()
+        # Default: o'zbek tili
+        lang = "uz"
 
-            if row is None:
-                # Yangi foydalanuvchi — bazaga qo'shish
-                ref_code = secrets.token_hex(4).upper()
-                await db.execute(
-                    """INSERT OR IGNORE INTO users
-                       (tg_id, username, full_name, referral_code)
-                       VALUES (?, ?, ?, ?)""",
-                    (user.id, user.username, user.full_name, ref_code)
-                )
-                await db.commit()
-                lang = "uz"
-            else:
-                is_banned, lang = row[0], row[1]
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT is_banned, lang FROM users WHERE tg_id = ?",
+                    (user.id,),
+                ) as cursor:
+                    row = await cursor.fetchone()
 
-                if is_banned:
-                    if isinstance(event, Message):
-                        await event.answer("🚫 Siz bloklangansiz.")
-                    elif isinstance(event, CallbackQuery):
-                        await event.answer("🚫 Siz bloklangansiz.", show_alert=True)
-                    return
+                if row is None:
+                    # ── Yangi foydalanuvchi — bazaga qo'shish ──────────
+                    ref_code = secrets.token_hex(4).upper()
+                    await db.execute(
+                        """INSERT OR IGNORE INTO users
+                           (tg_id, username, full_name, referral_code)
+                           VALUES (?, ?, ?, ?)""",
+                        (user.id, user.username, user.full_name, ref_code),
+                    )
+                    await db.commit()
+                    # lang allaqachon "uz" ga set qilingan (yuqorida)
+                else:
+                    is_banned: int = row[0]
+                    lang = row[1] or "uz"
 
-        # lang ni keyingi middleware va handlerlarga uzatamiz
-        data["lang"] = lang or "uz"
+                    if is_banned:
+                        if isinstance(event, Message):
+                            await event.answer("🚫 Siz bloklangansiz.")
+                        elif isinstance(event, CallbackQuery):
+                            await event.answer(
+                                "🚫 Siz bloklangansiz.", show_alert=True
+                            )
+                        return  # Banlangan foydalanuvchini to'xtatamiz
+
+        except Exception as exc:
+            # DB xatosi botni to'xtatmasin — faqat log yozilsin
+            logger.error("AuthMiddleware DB xatosi (user_id=%s): %s", user.id, exc)
+
+        # lang ni handler va keyingi middlewarelarga uzatamiz
+        data["lang"] = lang
 
         return await handler(event, data)

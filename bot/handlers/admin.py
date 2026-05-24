@@ -1,6 +1,7 @@
 import csv
 import io
 import random
+import asyncio
 from datetime import datetime, timedelta
 
 from aiogram import Router, F, Bot
@@ -151,14 +152,20 @@ async def save_film_final(call: CallbackQuery, state: FSMContext, bot: Bot):
     data = await state.get_data()
     await state.clear()
     
+    # Ma'lumotlar to'liqligini qattiq nazorat qilish
+    title_uz = data.get('title_uz', '').strip()
+    if not title_uz:
+        await call.message.edit_text("❌ Xato: O'zbekcha nom aniqlanmadi, jarayon bekor qilindi.")
+        return
+        
     async with get_db() as db:
         code = await generate_unique_code(db)
         
-        # Database'ga saqlash
+        # EXECUTED FIX: movies.title NOT NULL cheklovini buzmaslik uchun title_uz ni ham title, ham title_uz ustunlariga yozamiz!
         await db.execute("""
-            INSERT INTO movies (code, title_uz, title_ru, country, year, genres, description, file_id, poster_file_id, is_premium, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
-        """, (code, data['title_uz'], data['title_ru'], data['country'], data['year'], data['genres'], data['description'], data['file_id'], data['poster_file_id'], is_premium))
+            INSERT INTO movies (code, title, title_uz, title_ru, country, year, genres, description, file_id, poster_file_id, is_premium, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+        """, (code, title_uz, title_uz, data['title_ru'], data['country'], data['year'], data['genres'], data['description'], data['file_id'], data['poster_file_id'], is_premium))
         await db.commit()
 
     # Private Kanalga Backup (Fayl yo'qolmasligi uchun)
@@ -166,7 +173,7 @@ async def save_film_final(call: CallbackQuery, state: FSMContext, bot: Bot):
         await bot.send_video(
             chat_id=CHANNEL_PRIVATE,
             video=data['file_id'],
-            caption=f"📦 BACKUP | FILM\n🔑 KOD: {code}\n🎬 NOM (UZ): {data['title_uz']}\n🌐 NOM (RU): {data['title_ru']}"
+            caption=f"📦 BACKUP | FILM\n🔑 KOD: {code}\n🎬 NOM (UZ): {title_uz}\n🌐 NOM (RU): {data['title_ru']}"
         )
     except Exception as e:
         print(f"Private Backup error: {e}")
@@ -176,7 +183,7 @@ async def save_film_final(call: CallbackQuery, state: FSMContext, bot: Bot):
     premium_tag = "⭐ PREMIUM" if is_premium else "🔓 TEKIN"
     
     pub_caption = (
-        f"🎬 <b>{data['title_uz'].upper()}</b>\n"
+        f"🎬 <b>{title_uz.upper()}</b>\n"
         f"🧚‍♀️ Mashhur multfilm/kino endi botimizda!\n\n"
         f"🌍 {data['country']}\n"
         f"📅 {data['year']}\n"
@@ -498,7 +505,7 @@ async def admin_movie_view(message: Message):
     m = dict(zip(cols, row))
 
     text = (
-        f"🎬 <b>{m['title']}</b>\n\n"
+        f"🎬 <b>{m.get('title_uz') or m.get('title')}</b>\n\n"
         f"🔑 Kod: <code>{m['code']}</code>\n"
         f"🎭 Janr: {m.get('genre', '')}\n"
         f"📅 Yil: {m.get('year', '')}\n"

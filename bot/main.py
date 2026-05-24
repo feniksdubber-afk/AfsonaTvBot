@@ -16,6 +16,10 @@ Router ulash tartibi (muhim!):
 Middleware tartibi:
   1. AuthMiddleware         — foydalanuvchi yaratish, ban tekshirish, lang
   2. SubscriptionMiddleware — majburiy kanal obunasi
+
+O'ZGARISH:
+  - MemoryStorage → aiogram_sqlite_storage.SQLiteStorage
+    Bot to'xtab qayta ishga tushsa FSM holatlari saqlanib qoladi.
 """
 
 import asyncio
@@ -23,9 +27,9 @@ import logging
 import os
 
 from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram_sqlite_storage import SQLiteStorage
 
-from bot.config import BOT_TOKEN
+from bot.config import BOT_TOKEN, DB_PATH
 from bot.database.db import init_db
 from bot.handlers import (
     user,
@@ -41,8 +45,9 @@ from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.subscription import SubscriptionMiddleware
 from bot.utils.scheduler import setup_scheduler
 
-# ── Logs papkasini yaratish ──────────────────────────────────────────
+# ── Papkalarni yaratish ──────────────────────────────────────────────
 os.makedirs("logs", exist_ok=True)
+os.makedirs(os.path.dirname(DB_PATH) or "data", exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,14 +60,17 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# FSM holatlari saqlanadigan fayl (kino DB dan alohida — aralashmasin)
+FSM_DB_PATH = DB_PATH.replace("kinobot.db", "fsm.db")
+
 
 async def main() -> None:
     # 1. Ma'lumotlar bazasini ishga tushirish
     await init_db()
 
-    # 2. Bot va Dispatcher
+    # 2. Bot va Dispatcher — SQLiteStorage bilan
     bot = Bot(token=BOT_TOKEN)
-    dp  = Dispatcher(storage=MemoryStorage())
+    dp  = Dispatcher(storage=SQLiteStorage(FSM_DB_PATH))
 
     # ── Middleware (tartib muhim!) ────────────────────────────────────
     dp.message.middleware(AuthMiddleware())
@@ -85,7 +93,7 @@ async def main() -> None:
     # ── Scheduler ────────────────────────────────────────────────────
     scheduler = setup_scheduler(bot)
 
-    logger.info("🚀 Bot muvaffaqiyatli ishga tushdi!")
+    logger.info("🚀 Bot muvaffaqiyatli ishga tushdi! (FSM: SQLiteStorage → %s)", FSM_DB_PATH)
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)

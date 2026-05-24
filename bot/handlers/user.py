@@ -21,7 +21,7 @@ class SupportState(StatesGroup):
 
 # ── Helpers ────────────────────────────────────────────
 async def get_user(tg_id: int) -> dict | None:
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT * FROM users WHERE tg_id = ?", (tg_id,)
         ) as cur:
@@ -46,7 +46,7 @@ async def cmd_start(message: Message):
         ref_code = args[1]
         if ref_code.startswith("ref_"):
             code = ref_code[4:]
-            async with await get_db() as db:
+            async with get_db() as db:
                 async with db.execute(
                     "SELECT tg_id FROM users WHERE referral_code = ?", (code,)
                 ) as cur:
@@ -56,7 +56,6 @@ async def cmd_start(message: Message):
                         "UPDATE users SET referred_by = ? WHERE tg_id = ?",
                         (inviter[0], message.from_user.id)
                     )
-                    # Referal uchun ball
                     await db.execute(
                         "UPDATE users SET balance = balance + 50 WHERE tg_id = ?",
                         (inviter[0],)
@@ -85,8 +84,7 @@ async def show_profile(message: Message):
         return
     lang = user["lang"]
 
-    # Statistika
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT COUNT(*) FROM watch_history WHERE user_id = ?", (user["tg_id"],)
         ) as cur:
@@ -141,7 +139,7 @@ async def change_lang(call: CallbackQuery):
 @router.callback_query(F.data.startswith("set_lang_"))
 async def set_lang(call: CallbackQuery):
     new_lang = call.data.split("_")[-1]
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute(
             "UPDATE users SET lang = ? WHERE tg_id = ?",
             (new_lang, call.from_user.id)
@@ -168,7 +166,7 @@ async def notifications(call: CallbackQuery):
 async def toggle_notify(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     new_val = 0 if user["notify"] else 1
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute(
             "UPDATE users SET notify = ? WHERE tg_id = ?",
             (new_val, call.from_user.id)
@@ -189,7 +187,7 @@ async def toggle_notify(call: CallbackQuery):
 async def night_mode(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     new_val = 0 if user["night_mode"] else 1
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute(
             "UPDATE users SET night_mode = ? WHERE tg_id = ?",
             (new_val, call.from_user.id)
@@ -210,7 +208,7 @@ async def referral(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     lang = user["lang"]
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT COUNT(*) FROM users WHERE referred_by = ?", (user["tg_id"],)
         ) as cur:
@@ -240,7 +238,7 @@ async def favorites(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     lang = user["lang"]
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             """SELECT m.code, m.title FROM favorites f
                JOIN movies m ON f.movie_id = m.id
@@ -271,7 +269,7 @@ async def watch_history(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     lang = user["lang"]
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             """SELECT m.code, m.title, h.watched_at FROM watch_history h
                JOIN movies m ON h.movie_id = m.id
@@ -314,7 +312,7 @@ async def movie_request_save(message: Message, state: FSMContext):
     user = await get_user(message.from_user.id)
     lang = user["lang"]
 
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute(
             "INSERT INTO movie_requests (user_id, text) VALUES (?, ?)",
             (message.from_user.id, message.text)
@@ -349,7 +347,6 @@ async def support_save(message: Message, state: FSMContext):
     user = await get_user(message.from_user.id)
     lang = user["lang"]
 
-    # Adminlarga yuborish
     admin_text = (
         f"📞 <b>Support xabari</b>\n\n"
         f"👤 {message.from_user.full_name} "
@@ -377,7 +374,7 @@ async def back_profile(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     lang = user["lang"]
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT COUNT(*) FROM watch_history WHERE user_id = ?", (user["tg_id"],)
         ) as cur:

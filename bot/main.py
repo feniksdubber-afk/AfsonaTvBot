@@ -1,7 +1,3 @@
-```python
-"""
-bot/main.py — Majburiy kanal qo'shilgandan keyingi holat
-"""
 import asyncio
 import logging
 import os
@@ -47,23 +43,23 @@ async def main():
     dp.callback_query.middleware(SubscriptionMiddleware())
 
     # ── Routerlar ────────────────────────────────────────────────────
-    # subscription_handler BIRINCHI — check_subscription callback uchun
     dp.include_router(subscription_handler.router)
     dp.include_router(inline_search.router)
     dp.include_router(admin_channels.router)
     dp.include_router(user.router)
     dp.include_router(movie.router)
-    dp.include_router(admin.router)  # Birlashtirilgan barcha admin buyruqlari va FSM mantiqlari shu router ichida
+    dp.include_router(admin.router)
     dp.include_router(premium.router)
     dp.include_router(gamification.router)
 
     setup_scheduler(bot)
 
-    print("🤖 Bot ishga tushdi!")
-    await dp.start_polling(bot, skip_updates=True)
+    logging.info("🚀 Bot muvaffaqiyatli ishga tushdi!")
+    
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
-
-```

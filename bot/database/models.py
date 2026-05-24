@@ -3,7 +3,13 @@ models.py
 ─────────
 Barcha jadval sxemalari (CREATE TABLE IF NOT EXISTS).
 Bu fayl faqat jadval tuzilmasini ta'riflaydi.
-init_db() bu yerda YO'Q — u db.py da joylashgan (bir joyda!).
+init_db() bu yerda YO'Q — u db.py da joylashgan.
+
+TUZATILGAN:
+  - error_logs jadvaliga `handler` ustuni qo'shildi
+    (error_logger.py uni INSERT da ishlatadi, lekin jadvalda yo'q edi)
+  - favorites jadvalidagi UNIQUE constraint izohi aniqlantirildi
+    (NULL muammosi migrations.py da partial index bilan hal qilinadi)
 """
 
 import aiosqlite
@@ -37,24 +43,24 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS movies (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     code           TEXT    UNIQUE NOT NULL,
-    title          TEXT    NOT NULL,           -- asosiy nom (title_uz bilan bir xil)
-    title_uz       TEXT,                       -- o'zbekcha nom
-    title_ru       TEXT,                       -- ruscha nom
+    title          TEXT    NOT NULL,
+    title_uz       TEXT,
+    title_ru       TEXT,
     description    TEXT,
-    genre          TEXT,                       -- eski ustun (mos kelish uchun saqlanadi)
-    genres         TEXT,                       -- yangi ustun (vergul bilan)
+    genre          TEXT,
+    genres         TEXT,
     year           INTEGER,
     country        TEXT,
     rating         REAL    DEFAULT 0,
     is_premium     INTEGER DEFAULT 0,
-    is_series      INTEGER DEFAULT 0,          -- eski ustun (mos kelish uchun)
-    season         INTEGER,                    -- eski ustun (mos kelish uchun)
-    episode        INTEGER,                    -- eski ustun (mos kelish uchun)
+    is_series      INTEGER DEFAULT 0,
+    season         INTEGER,
+    episode        INTEGER,
     file_id        TEXT,
-    poster_id      TEXT,                       -- eski ustun (mos kelish uchun)
-    poster_file_id TEXT,                       -- yangi ustun
+    poster_id      TEXT,
+    poster_file_id TEXT,
     views          INTEGER DEFAULT 0,
-    status         TEXT    DEFAULT 'active',   -- active / archived / deleted
+    status         TEXT    DEFAULT 'active',
     created_at     TEXT    DEFAULT (datetime('now'))
 );
 
@@ -72,7 +78,7 @@ CREATE TABLE IF NOT EXISTS series (
     poster_file_id TEXT,
     description    TEXT,
     is_premium     INTEGER DEFAULT 0,
-    status         TEXT    DEFAULT 'active',   -- active / archived / deleted
+    status         TEXT    DEFAULT 'active',
     created_at     TEXT    DEFAULT (datetime('now'))
 );
 
@@ -103,9 +109,8 @@ CREATE TABLE IF NOT EXISTS episodes (
 
 -- ════════════════════════════════════════════
 --  SEVIMLILAR
---  movie_id  → filmlar uchun
---  series_id → seriallar uchun
---  Ikkalasi ham NULL bo'lishi mumkin (biri to'ldiriladi)
+--  ESLATMA: NULL muammosi (NULL != NULL) migrations.py da
+--           partial index orqali hal qilingan.
 -- ════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS favorites (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,7 +119,6 @@ CREATE TABLE IF NOT EXISTS favorites (
     series_id INTEGER,
     added_at  TEXT    DEFAULT (datetime('now')),
     UNIQUE(user_id, movie_id),
-    UNIQUE(user_id, series_id),
     FOREIGN KEY (user_id)   REFERENCES users(tg_id)   ON DELETE CASCADE,
     FOREIGN KEY (movie_id)  REFERENCES movies(id)     ON DELETE CASCADE,
     FOREIGN KEY (series_id) REFERENCES series(id)     ON DELETE CASCADE
@@ -122,8 +126,6 @@ CREATE TABLE IF NOT EXISTS favorites (
 
 -- ════════════════════════════════════════════
 --  KO'RISH TARIXI
---  movie_id  → filmlar uchun
---  series_id + season + episode → seriallar uchun
 -- ════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS watch_history (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -172,8 +174,8 @@ CREATE TABLE IF NOT EXISTS user_ratings (
 CREATE TABLE IF NOT EXISTS tariffs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT    NOT NULL,
-    duration    INTEGER NOT NULL,   -- kunlar soni
-    price       INTEGER NOT NULL,   -- so'mda
+    duration    INTEGER NOT NULL,
+    price       INTEGER NOT NULL,
     description TEXT,
     is_active   INTEGER DEFAULT 1
 );
@@ -186,8 +188,8 @@ CREATE TABLE IF NOT EXISTS payments (
     user_id        INTEGER NOT NULL,
     tariff_id      INTEGER,
     amount         INTEGER NOT NULL,
-    method         TEXT,             -- click / payme / card
-    status         TEXT    DEFAULT 'pending',  -- pending / paid / rejected
+    method         TEXT,
+    status         TEXT    DEFAULT 'pending',
     transaction_id TEXT,
     created_at     TEXT    DEFAULT (datetime('now')),
     paid_at        TEXT,
@@ -201,8 +203,8 @@ CREATE TABLE IF NOT EXISTS payments (
 CREATE TABLE IF NOT EXISTS promo_codes (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     code       TEXT    UNIQUE NOT NULL,
-    type       TEXT    NOT NULL,     -- premium / balance
-    value      INTEGER NOT NULL,     -- kunlar yoki so'm
+    type       TEXT    NOT NULL,
+    value      INTEGER NOT NULL,
     uses_left  INTEGER DEFAULT 1,
     expires_at TEXT
 );
@@ -215,7 +217,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     title       TEXT    NOT NULL,
     description TEXT,
     reward      INTEGER NOT NULL DEFAULT 0,
-    type        TEXT    NOT NULL,    -- watch / referral / rate / url / manual
+    type        TEXT    NOT NULL,
     target_url  TEXT,
     is_active   INTEGER DEFAULT 1
 );
@@ -240,13 +242,13 @@ CREATE TABLE IF NOT EXISTS movie_requests (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER NOT NULL,
     text       TEXT    NOT NULL,
-    status     TEXT    DEFAULT 'pending',  -- pending / accepted / rejected
+    status     TEXT    DEFAULT 'pending',
     created_at TEXT    DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(tg_id) ON DELETE CASCADE
 );
 
 -- ════════════════════════════════════════════
---  SOZLAMALAR (kanal obunasi va boshqalar)
+--  SOZLAMALAR
 -- ════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
@@ -255,10 +257,12 @@ CREATE TABLE IF NOT EXISTS settings (
 
 -- ════════════════════════════════════════════
 --  XATOLIKLAR LOGI
+--  TUZATILGAN: handler ustuni qo'shildi
 -- ════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS error_logs (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     error      TEXT,
+    handler    TEXT,
     user_id    INTEGER,
     created_at TEXT DEFAULT (datetime('now'))
 );
@@ -269,8 +273,8 @@ CREATE TABLE IF NOT EXISTS error_logs (
 CREATE TABLE IF NOT EXISTS point_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER NOT NULL,
-    amount     INTEGER NOT NULL,   -- manfiy bo'lishi ham mumkin
-    reason     TEXT,               -- 'watch_movie', 'referral', 'task_3', ...
+    amount     INTEGER NOT NULL,
+    reason     TEXT,
     created_at TEXT    DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(tg_id) ON DELETE CASCADE
 );
@@ -282,9 +286,9 @@ CREATE TABLE IF NOT EXISTS tournaments (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     title       TEXT    NOT NULL,
     description TEXT,
-    prizes      TEXT,              -- matn (admin kiritadi)
+    prizes      TEXT,
     top_n       INTEGER DEFAULT 3,
-    status      TEXT    DEFAULT 'active',  -- active / finished
+    status      TEXT    DEFAULT 'active',
     start_at    TEXT,
     end_at      TEXT,
     created_at  TEXT    DEFAULT (datetime('now'))
@@ -313,7 +317,6 @@ async def _create_tables(db: aiosqlite.Connection) -> None:
     """
     await db.executescript(CREATE_TABLES)
 
-    # Default sozlamalar
     await db.executemany(
         "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
         [

@@ -297,7 +297,6 @@ async def cb_my_points(call: CallbackQuery):
         await call.answer("Xatolik", show_alert=True)
         return
 
-    # So'nggi 5 ta log
     logs = []
     async with await get_db() as db:
         async with db.execute(
@@ -316,22 +315,21 @@ async def cb_my_points(call: CallbackQuery):
         log_text += f"\n  {sign}{amount} — {reason} ({date})"
 
     empty_uz = "\n  (bo'sh)"
-empty_ru = "\n  (пусто)"
+    empty_ru = "\n  (пусто)"
 
-msg = txt(
-    f"💰 <b>Sizning ballingiz</b>\n\n"
-    f"🏅 Jami ball: <b>{user['balance']}</b>\n"
-    f"\n📜 <b>Oxirgi operatsiyalar:</b>{log_text or empty_uz}",
+    msg = txt(
+        f"💰 <b>Sizning ballingiz</b>\n\n"
+        f"🏅 Jami ball: <b>{user['balance']}</b>\n"
+        f"\n📜 <b>Oxirgi operatsiyalar:</b>{log_text or empty_uz}",
 
-    f"💰 <b>Ваши баллы</b>\n\n"
-    f"🏅 Всего баллов: <b>{user['balance']}</b>\n"
-    f"\n📜 <b>Последние операции:</b>{log_text or empty_ru}",
-    lang
-)
-await call.message.edit_text(msg, reply_markup=back_to_game_kb(lang), parse_mode="HTML")
-await call.answer()
-
-
+        f"💰 <b>Ваши баллы</b>\n\n"
+        f"🏅 Всего баллов: <b>{user['balance']}</b>\n"
+        f"\n📜 <b>Последние операции:</b>{log_text or empty_ru}",
+        lang
+    )
+    await call.message.edit_text(msg, reply_markup=back_to_game_kb(lang), parse_mode="HTML")
+    await call.answer()
+    
 # ═══════════════════════════════════════════════════════════════════
 #  LIDERLAR TAXTASI
 # ═══════════════════════════════════════════════════════════════════

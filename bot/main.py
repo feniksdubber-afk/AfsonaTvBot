@@ -1,3 +1,4 @@
+```python
 """
 bot/main.py — Majburiy kanal qo'shilgandan keyingi holat
 """
@@ -12,7 +13,6 @@ from bot.config import BOT_TOKEN
 from bot.database.db import init_db
 from bot.handlers import user, movie, admin, premium, gamification
 from bot.handlers import subscription as subscription_handler
-from bot.handlers.admin import add_movie_fsm, add_series_fsm, edit_content
 from bot.handlers import inline_search
 from bot.handlers import admin_channels
 from bot.middlewares.auth import AuthMiddleware
@@ -49,14 +49,11 @@ async def main():
     # ── Routerlar ────────────────────────────────────────────────────
     # subscription_handler BIRINCHI — check_subscription callback uchun
     dp.include_router(subscription_handler.router)
-    dp.include_router(add_movie_fsm.router)
-    dp.include_router(add_series_fsm.router)
-    dp.include_router(edit_content.router)
     dp.include_router(inline_search.router)
     dp.include_router(admin_channels.router)
     dp.include_router(user.router)
     dp.include_router(movie.router)
-    dp.include_router(admin.router)
+    dp.include_router(admin.router)  # Birlashtirilgan barcha admin buyruqlari va FSM mantiqlari shu router ichida
     dp.include_router(premium.router)
     dp.include_router(gamification.router)
 
@@ -68,3 +65,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+```

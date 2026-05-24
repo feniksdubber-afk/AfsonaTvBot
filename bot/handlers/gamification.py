@@ -315,18 +315,21 @@ async def cb_my_points(call: CallbackQuery):
         date = created_at[:10] if created_at else ""
         log_text += f"\n  {sign}{amount} — {reason} ({date})"
 
-    msg = txt(
-        f"💰 <b>Sizning ballingiz</b>\n\n"
-        f"🏅 Jami ball: <b>{user['balance']}</b>\n"
-        f"\n📜 <b>Oxirgi operatsiyalar:</b>{log_text or chr(10) + '  (bo'sh)'}",
+    empty_uz = "\n  (bo'sh)"
+empty_ru = "\n  (пусто)"
 
-        f"💰 <b>Ваши баллы</b>\n\n"
-        f"🏅 Всего баллов: <b>{user['balance']}</b>\n"
-        f"\n📜 <b>Последние операции:</b>{log_text or chr(10) + '  (пусто)'}",
-        lang
-    )
-    await call.message.edit_text(msg, reply_markup=back_to_game_kb(lang), parse_mode="HTML")
-    await call.answer()
+msg = txt(
+    f"💰 <b>Sizning ballingiz</b>\n\n"
+    f"🏅 Jami ball: <b>{user['balance']}</b>\n"
+    f"\n📜 <b>Oxirgi operatsiyalar:</b>{log_text or empty_uz}",
+
+    f"💰 <b>Ваши баллы</b>\n\n"
+    f"🏅 Всего баллов: <b>{user['balance']}</b>\n"
+    f"\n📜 <b>Последние операции:</b>{log_text or empty_ru}",
+    lang
+)
+await call.message.edit_text(msg, reply_markup=back_to_game_kb(lang), parse_mode="HTML")
+await call.answer()
 
 
 # ═══════════════════════════════════════════════════════════════════

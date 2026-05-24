@@ -637,43 +637,106 @@ async def promo_check(message: Message, state: FSMContext):
 # ════════════════════════════════════════════════════════
 #  ⏰ PREMIUM ESLATMA (scheduler tomonidan chaqiriladi)
 # ════════════════════════════════════════════════════════
-async def send_premium_reminders(bot):
-    """3 kun va 1 kun qolganda eslatma yuborish"""
+async def send_premium_reminders(bot) -> None:
+    """
+    3 kun va 1 kun qolganda premium eslatma yuboradi.
+    Faqat notify=1 bo'lgan foydalanuvchilarga xabar ketadi.
+
+    Args:
+        bot: Aiogram Bot obyekti
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
     async with get_db() as db:
         for days_left in [3, 1]:
             target_date = (datetime.now() + timedelta(days=days_left)).strftime("%Y-%m-%d")
+
             async with db.execute(
                 """SELECT tg_id, lang, premium_until FROM users
-                   WHERE is_premium = 1 AND premium_until = ? AND notify = 1""",
+                   WHERE is_premium = 1
+                     AND premium_until = ?
+                     AND notify = 1""",
                 (target_date,)
             ) as cur:
                 users = await cur.fetchall()
 
-        for (tg_id, lang, until) in users:
-            text = txt(
-                f"⚠️ <b>Premium eslatma</b>\n\n"
-                f"Sizning Premium obunangiz <b>{days_left} kun</b> ichida tugaydi!\n"
-                f"📅 Muddat: {until}\n\n"
-                f"Uzaytirish uchun /premium yozing.",
-                f"⚠️ <b>Напоминание о Premium</b>\n\n"
-                f"Ваша Premium подписка истекает через <b>{days_left} дня</b>!\n"
-                f"📅 До: {until}\n\n"
-                f"Для продления напишите /premium.",
-                lang
-            )
-            try:
-                await bot.send_message(tg_id, text, parse_mode="HTML")
-            except Exception:
-                pass
+            # TUZATISH: har bir days_left uchun alohida yuboriladi
+            # (avvalgi kodda faqat oxirgi iteratsiya ishlar edi)
+            sent = 0
+            for (tg_id, lang, until) in users:
+                text = txt(
+                    f"⚠️ <b>Premium eslatma</b>\n\n"
+                    f"Sizning Premium obunangiz <b>{days_left} kun</b> ichida tugaydi!\n"
+                    f"📅 Muddat: {until}\n\n"
+                    f"Uzaytirish uchun /premium yozing.",
+                    f"⚠️ <b>Напоминание о Premium</b>\n\n"
+                    f"Ваша Premium подписка истекает через <b>{days_left} дня</b>!\n"
+                    f"📅 До: {until}\n\n"
+                    f"Для продления напишите /premium.",
+                    lang
+                )
+                try:
+                    await bot.send_message(tg_id, text, parse_mode="HTML")
+                    sent += 1
+                except Exception:
+                    pass
+
+            if users:
+                logger.info(
+                    "Premium eslatma: %d kun qoldi — %d/%d foydalanuvchiga yuborildi.",
+                    days_left, sent, len(users)
+                )
 
 
-async def deactivate_expired_premium():
-    """Muddati tugagan premiumlarni o'chirish"""
+async def deactivate_expired_premium(bot=None) -> None:
+    """
+    Muddati tugagan premiumlarni o'chiradi va foydalanuvchilarga xabar yuboradi.
+
+    Args:
+        bot: Aiogram Bot obyekti (ixtiyoriy — xabar yuborish uchun)
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
     today = datetime.now().strftime("%Y-%m-%d")
+
     async with get_db() as db:
+        # O'chirilayotgan foydalanuvchilarni oldindan olamiz (xabar yuborish uchun)
+        async with db.execute(
+            """SELECT tg_id, lang FROM users
+               WHERE is_premium = 1 AND premium_until < ?""",
+            (today,)
+        ) as cur:
+            expired_users = await cur.fetchall()
+
+        if not expired_users:
+            return
+
+        # Premiumni o'chirish
         await db.execute(
-            """UPDATE users SET is_premium = 0, premium_until = NULL
+            """UPDATE users
+               SET is_premium = 0, premium_until = NULL
                WHERE is_premium = 1 AND premium_until < ?""",
             (today,)
         )
         await db.commit()
+
+    logger.info("Premium muddati tugadi: %d foydalanuvchi deaktivatsiya qilindi.", len(expired_users))
+
+    # Foydalanuvchilarga xabar yuborish (bot berilgan bo'lsa)
+    if bot is None:
+        return
+
+    for (tg_id, lang) in expired_users:
+        text = txt(
+            "😔 <b>Premium obunangiz tugadi.</b>\n\n"
+            "Davom ettirish uchun /premium yozing.",
+            "😔 <b>Ваша Premium подписка закончилась.</b>\n\n"
+            "Для продления напишите /premium.",
+            lang
+        )
+        try:
+            await bot.send_message(tg_id, text, parse_mode="HTML")
+        except Exception:
+            pass

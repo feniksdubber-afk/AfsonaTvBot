@@ -3,4 +3,4 @@ python-dotenv==1.0.0
 aiosqlite==0.20.0
 apscheduler==3.10.4
 pillow==10.4.0
-aiogram-sqlite-storage==0.3.0
+aiogram-sqlite-storage==1.0.1

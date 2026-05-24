@@ -16,12 +16,12 @@ Router ulash tartibi (muhim!):
   9. gamification         — ball tizimi, vazifalar, turnir
 
 Middleware tartibi:
-  1. AuthMiddleware       — foydalanuvchi yaratish, ban tekshirish, lang
+  1. AuthMiddleware         — foydalanuvchi yaratish, ban tekshirish, lang
   2. SubscriptionMiddleware — majburiy kanal obunasi
 
-Storage:
-  - MemoryStorage o'rniga aiosqlite asosidagi SQLiteStorage ishlatiladi.
-    Bot qayta ishga tushsa ham FSM statelari saqlanib qoladi.
+TUZATILGAN:
+  - Scheduler finally blokida to'g'ri yopiladi (scheduler.shutdown())
+  - InlineQuery uchun AuthMiddleware qo'shildi (lang uchun)
 """
 
 import asyncio
@@ -63,42 +63,25 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _get_storage():
-    """
-    FSM Storage ni qaytaradi.
-    Birinchi navbatda aiogram-contrib SQLiteStorage ishlatiladi.
-    Agar paket o'rnatilmagan bo'lsa — MemoryStorage (fallback).
-    """
-    try:
-        # aiogram 3.x uchun — fsm storage disk-based varianti
-        from aiogram.fsm.storage.memory import MemoryStorage as _MS
-        # Kelajakda RedisStorage yoki SQLiteStorage qo'shish uchun shu yerga
-        # Hozircha MemoryStorage qoladi, lekin oson almashtiriladi
-        storage = _MS()
-        logger.warning(
-            "⚠️  FSM uchun MemoryStorage ishlatilmoqda. "
-            "Bot qayta ishga tushsa aktiv FSM statelari yo'qoladi. "
-            "Production uchun RedisStorage tavsiya etiladi."
-        )
-        return storage
-    except Exception as exc:
-        logger.error("Storage yaratishda xato: %s", exc)
-        return MemoryStorage()
-
-
 async def main() -> None:
     # 1. Ma'lumotlar bazasini ishga tushirish
     await init_db()
 
     # 2. Bot va Dispatcher
     bot = Bot(token=BOT_TOKEN)
-    dp  = Dispatcher(storage=_get_storage())
+    storage = MemoryStorage()
+    # ESLATMA: Production uchun RedisStorage yoki SQLiteStorage tavsiya etiladi.
+    # MemoryStorage bot qayta ishga tushganda aktiv FSM holatlarini yo'qotadi.
+    # Almashtirish uchun: pip install aiogram[redis] va RedisStorage(redis=...) ishlating.
+    dp = Dispatcher(storage=storage)
 
     # ── Middleware (tartib muhim!) ────────────────────────────────────
-    # 1. Auth — foydalanuvchini yaratadi, ban tekshiradi, lang o'rnatadi
-    # 2. Subscription — kanal obunasini tekshiradi
+    # message va callback_query uchun
     dp.message.middleware(AuthMiddleware())
     dp.callback_query.middleware(AuthMiddleware())
+    # TUZATILGAN: inline_query uchun ham AuthMiddleware kerak (lang olish uchun)
+    dp.inline_query.middleware(AuthMiddleware())
+
     dp.message.middleware(SubscriptionMiddleware())
     dp.callback_query.middleware(SubscriptionMiddleware())
 
@@ -114,7 +97,7 @@ async def main() -> None:
     dp.include_router(gamification.router)           # 9
 
     # ── Scheduler ────────────────────────────────────────────────────
-    setup_scheduler(bot)
+    scheduler = setup_scheduler(bot)
 
     logger.info("🚀 Bot muvaffaqiyatli ishga tushdi!")
 
@@ -122,5 +105,9 @@ async def main() -> None:
         await bot.delete_webhook(drop_pending_updates=True)
         await dp.start_polling(bot)
     finally:
+        # TUZATILGAN: Scheduler to'g'ri yopiladi
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+            logger.info("⏹ Scheduler to'xtatildi.")
         await bot.session.close()
         logger.info("👋 Bot to'xtatildi.")

@@ -306,7 +306,7 @@ async def movie_save(call: CallbackQuery, state: FSMContext):
         f"✅ <b>Kino saqlandi!</b>\n\n"
         f"📌 Kod: <code>{data['code']}</code>\n"
         f"🎬 Nom: {data.get('title') or 'Nomsiz'}{series_info}\n"
-        f"⭐ Premium: {'Ha' if data.get('is_premium') else \"Yo'q\"}",
+        f"⭐ Premium: {'Ha' if data.get('is_premium') else 'Yo'q'}",
         parse_mode="HTML"
     )
     await call.answer()

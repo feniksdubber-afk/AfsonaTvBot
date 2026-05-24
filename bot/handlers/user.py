@@ -72,8 +72,8 @@ async def cmd_start(message: Message):
 
     # ── premium deep link ────────────────────────────────────────────
     if len(args_list) > 1 and args_list[1] == "premium":
-        from bot.handlers.premium import show_premium_menu
-        await show_premium_menu(message)
+        from bot.handlers.premium import show_premium
+        await show_premium(message)
         return
 
     greeting = txt(

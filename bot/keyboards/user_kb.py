@@ -120,3 +120,36 @@ def series_nav_kb(code_base: str, season: int, episode: int,
     if nav:
         buttons.append(nav)
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+# ==================== INLINES (PREMIUM & TO'LOVLAR) ====================
+
+def premium_tariffs_kb(tariffs: list, lang: str = "uz") -> InlineKeyboardMarkup:
+    buttons = []
+    for t in tariffs:
+        label = f"⭐ {t['name']} — {t['price']:,} so'm ({t['duration']} kun)"
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"buy_tariff_{t['id']}")])
+    cancel = "❌ Bekor qilish" if lang == "uz" else "❌ Отмена"
+    buttons.append([InlineKeyboardButton(text=cancel, callback_data="cancel_premium")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def payment_method_kb(tariff_id: int, lang: str = "uz") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Click",  callback_data=f"pay_click_{tariff_id}")],
+        [InlineKeyboardButton(text="💳 Payme",  callback_data=f"pay_payme_{tariff_id}")],
+        [InlineKeyboardButton(text="💳 Karta (manual)", callback_data=f"pay_card_{tariff_id}")],
+        [InlineKeyboardButton(text="◀️ Orqaga", callback_data="show_premium")],
+    ])
+
+def payment_confirm_kb(payment_id: int, lang: str = "uz") -> InlineKeyboardMarkup:
+    check = "✅ Chekni yubordim" if lang == "uz" else "✅ Я отправил чек"
+    cancel = "❌ Bekor qilish" if lang == "uz" else "❌ Отмена"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=check,  callback_data=f"check_sent_{payment_id}")],
+        [InlineKeyboardButton(text=cancel, callback_data=f"cancel_payment_{payment_id}")],
+    ])
+
+def admin_payment_kb(payment_id: int, user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"confirm_pay_{payment_id}_{user_id}"),
+        InlineKeyboardButton(text="❌ Rad etish",  callback_data=f"reject_pay_{payment_id}_{user_id}"),
+    ]])

@@ -71,6 +71,15 @@ CREATE TABLE IF NOT EXISTS comments (
     created_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Kinolarga berilgan baholar (Reyting)
+CREATE TABLE IF NOT EXISTS user_ratings (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id  INTEGER,
+    movie_id INTEGER,
+    stars    INTEGER,
+    UNIQUE(user_id, movie_id)
+);
+
 -- Premium to'lovlar
 CREATE TABLE IF NOT EXISTS payments (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,

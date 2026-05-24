@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 def get_db() -> aiosqlite.Connection:
     """
     Har bir handler/funksiya uchun yangi DB ulanishi ochadi.
+    WAL va foreign_keys har safar yoqiladi.
+
     Ishlatish:
         async with get_db() as db:
             ...
@@ -37,25 +39,28 @@ async def init_db() -> None:
     Bot ishga tushganda bir marta chaqiriladi.
     Tartib:
       1. data/ papkasini yaratadi (yo'q bo'lsa)
-      2. Barcha jadvallarni yaratadi
-      3. Migrationlarni ishga tushiradi (ALTER TABLE va hokazo)
+      2. WAL rejimi va foreign keys yoqiladi
+      3. Barcha jadvallarni yaratadi
+      4. Migrationlarni ishga tushiradi (ALTER TABLE va hokazo)
     """
     # 1. DB joylashgan papkani yaratish
     db_dir = os.path.dirname(DB_PATH)
     if db_dir:
         os.makedirs(db_dir, exist_ok=True)
 
-    # 2. Asosiy jadvallarni yaratish
+    # 2-3. Asosiy jadvallarni yaratish
     async with aiosqlite.connect(DB_PATH) as db:
-        # WAL rejimi — parallel o'qish/yozish uchun
+        # WAL rejimi — parallel o'qish/yozish uchun (performance ++)
         await db.execute("PRAGMA journal_mode = WAL")
         # Foreign key cheklovlarini yoqish
         await db.execute("PRAGMA foreign_keys = ON")
+        # Cache hajmini oshirish (4MB) — tez-tez o'qiladigan so'rovlar uchun
+        await db.execute("PRAGMA cache_size = -4000")
         await _create_tables(db)
 
     logger.info("✅ Asosiy jadvallar tayyor.")
 
-    # 3. Migrationlar (ALTER TABLE, yangi jadvallar va h.k.)
+    # 4. Migrationlar (ALTER TABLE, yangi jadvallar va h.k.)
     from bot.database.migrations import run_migrations
     await run_migrations()
 

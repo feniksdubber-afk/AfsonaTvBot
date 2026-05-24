@@ -1,7 +1,3 @@
-"""
-bot/database/models.py  —  E qism qo'shilgandan KEYINGI to'liq holat
-Eski faylingizni SHU BILAN ALMASHTIRING.
-"""
 import aiosqlite
 from bot.config import DB_PATH
 
@@ -155,16 +151,17 @@ CREATE TABLE IF NOT EXISTS error_logs (
 );
 
 -- ═══════════════════════════════════════════════════════════════
---  E QISM — Gamification uchun yangi jadvallar
+--  E QISM — Gamification uchun yangi jadvallar (To'g'rilangan)
 -- ═══════════════════════════════════════════════════════════════
 
 -- Ball tarixi logi
 CREATE TABLE IF NOT EXISTS point_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER NOT NULL,
-    amount     INTEGER NOT NULL,
-    reason     TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
+    amount     INTEGER NOT NULL,           -- manfiy bo'lishi ham mumkin
+    reason     TEXT,                       -- "watch_movie", "referral", "task_3", ...
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(tg_id)
 );
 
 -- Turnirlar
@@ -172,9 +169,9 @@ CREATE TABLE IF NOT EXISTS tournaments (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     title       TEXT NOT NULL,
     description TEXT,
-    prizes      TEXT,
+    prizes      TEXT,                      -- matn (admin kiritadi)
     top_n       INTEGER DEFAULT 3,
-    status      TEXT DEFAULT 'active',
+    status      TEXT DEFAULT 'active',     -- active / finished
     start_at    TEXT,
     end_at      TEXT,
     created_at  TEXT DEFAULT (datetime('now'))
@@ -186,7 +183,9 @@ CREATE TABLE IF NOT EXISTS tournament_participants (
     tournament_id INTEGER NOT NULL,
     user_id       INTEGER NOT NULL,
     points        INTEGER DEFAULT 0,
-    UNIQUE(tournament_id, user_id)
+    UNIQUE(tournament_id, user_id),
+    FOREIGN KEY (tournament_id) REFERENCES tournaments(id),
+    FOREIGN KEY (user_id)       REFERENCES users(tg_id)
 );
 
 """

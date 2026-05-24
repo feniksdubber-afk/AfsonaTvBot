@@ -68,34 +68,27 @@ def _gen_code(title: str) -> str:
     return (base + suffix)[:8]
 
 
-async def _ensure_unique_code(db, code: str) -> str:
-    """
-    Kod bazada mavjud bo'lsa, oxiriga raqam qo'shib unikal qiladi.
-    Ikki jadvalda (movies va series) ham tekshiradi.
-    Maksimal 50 ta urinish — cheksiz loop yo'q.
-    """
-    original = code
-    for attempt in range(1, 51):
+async def _ensure_unique_code(db) -> str:
+    """3-5 xonali unikal raqamli kod yaratadi."""
+    for _ in range(100):
+        digits = random.randint(3, 5)
+        low  = 10 ** (digits - 1)
+        high = 10 ** digits - 1
+        code = str(random.randint(low, high))
+
         async with db.execute(
             "SELECT 1 FROM movies WHERE code = ?", (code,)
         ) as cur:
-            movie_exists = await cur.fetchone()
+            if await cur.fetchone():
+                continue
         async with db.execute(
             "SELECT 1 FROM series WHERE code = ?", (code,)
         ) as cur:
-            series_exists = await cur.fetchone()
+            if await cur.fetchone():
+                continue
+        return code
 
-        if not movie_exists and not series_exists:
-            return code
-
-        if attempt <= 20:
-            code = original + str(random.randint(1, 99))
-        else:
-            # Ko'p urinishda to'liq tasodifiy kod
-            code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
-
-    # Bu holatga amalda tushib bo'lmaydi
-    raise ValueError(f"_ensure_unique_code: unikal kod topilmadi (asl: {original})")
+    raise ValueError("_ensure_unique_code: unikal kod topilmadi!")
 
 
 def _parse_caption(caption: str) -> dict:
@@ -345,7 +338,7 @@ async def am_save(call: CallbackQuery, state: FSMContext) -> None:
 
     async with get_db() as db:
         # Unikal kod tekshirish va zarur bo'lsa o'zgartirish
-        code = await _ensure_unique_code(db, data.get("code") or _gen_code("MOVIE"))
+        code = await _ensure_unique_code(db)
 
         title_uz = (data.get("title_uz") or data.get("title") or "Nomsiz").strip()
         title_ru = (data.get("title_ru") or "").strip() or None

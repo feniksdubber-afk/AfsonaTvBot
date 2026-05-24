@@ -1,4 +1,3 @@
-```python
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart, Command
@@ -180,5 +179,3 @@ async def cb_back_to_series_menu(call: CallbackQuery):
     )
     await call.message.edit_caption(caption=caption, reply_markup=kb, parse_mode="HTML")
     await call.answer()
-
-```

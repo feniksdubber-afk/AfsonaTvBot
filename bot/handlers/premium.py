@@ -28,7 +28,7 @@ class PromoState(StatesGroup):
 
 # ── Helpers ────────────────────────────────────────────
 async def get_user(tg_id: int) -> dict | None:
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute("SELECT * FROM users WHERE tg_id = ?", (tg_id,)) as cur:
             row = await cur.fetchone()
             if row:
@@ -36,7 +36,7 @@ async def get_user(tg_id: int) -> dict | None:
     return None
 
 async def get_tariffs() -> list:
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT * FROM tariffs WHERE is_active = 1 ORDER BY price"
         ) as cur:
@@ -45,7 +45,7 @@ async def get_tariffs() -> list:
             return [dict(zip(cols, r)) for r in rows]
 
 async def activate_premium(user_id: int, days: int):
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT premium_until, is_premium FROM users WHERE tg_id = ?", (user_id,)
         ) as cur:
@@ -87,7 +87,7 @@ async def show_premium(event: Message | CallbackQuery):
 
     # Default tarifflar — bazada yo'q bo'lsa
     if not tariffs:
-        async with await get_db() as db:
+        async with get_db() as db:
             await db.executemany(
                 "INSERT OR IGNORE INTO tariffs (name, duration, price, description) VALUES (?, ?, ?, ?)",
                 [
@@ -143,7 +143,7 @@ async def buy_tariff(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     lang = user["lang"]
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute("SELECT * FROM tariffs WHERE id = ?", (tariff_id,)) as cur:
             row = await cur.fetchone()
             if not row:
@@ -174,7 +174,7 @@ async def pay_click(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     lang = user["lang"]
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute("SELECT * FROM tariffs WHERE id = ?", (tariff_id,)) as cur:
             row = await cur.fetchone()
             tariff = dict(zip([d[0] for d in cur.description], row))
@@ -228,7 +228,7 @@ async def verify_click(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     lang = user["lang"]
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT * FROM payments WHERE id = ? AND user_id = ?",
             (payment_id, call.from_user.id)
@@ -286,7 +286,7 @@ async def pay_payme(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     lang = user["lang"]
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute("SELECT * FROM tariffs WHERE id = ?", (tariff_id,)) as cur:
             row = await cur.fetchone()
             tariff = dict(zip([d[0] for d in cur.description], row))
@@ -339,7 +339,7 @@ async def verify_payme(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     lang = user["lang"]
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT * FROM payments WHERE id = ? AND user_id = ?",
             (payment_id, call.from_user.id)
@@ -382,7 +382,7 @@ async def pay_card(call: CallbackQuery, state: FSMContext):
     user = await get_user(call.from_user.id)
     lang = user["lang"]
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute("SELECT * FROM tariffs WHERE id = ?", (tariff_id,)) as cur:
             row = await cur.fetchone()
             tariff = dict(zip([d[0] for d in cur.description], row))
@@ -471,7 +471,7 @@ async def confirm_payment(call: CallbackQuery):
     _, _, payment_id, user_id = call.data.split("_")
     payment_id, user_id = int(payment_id), int(user_id)
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             "SELECT p.*, t.duration FROM payments p LEFT JOIN tariffs t ON p.tariff_id = t.id WHERE p.id = ?",
             (payment_id,)
@@ -521,7 +521,7 @@ async def reject_payment(call: CallbackQuery):
     _, _, payment_id, user_id = call.data.split("_")
     payment_id, user_id = int(payment_id), int(user_id)
 
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute(
             "UPDATE payments SET status = 'rejected' WHERE id = ?", (payment_id,)
         )
@@ -567,7 +567,7 @@ async def promo_check(message: Message, state: FSMContext):
     lang = user["lang"]
     code = message.text.strip().upper()
 
-    async with await get_db() as db:
+    async with get_db() as db:
         async with db.execute(
             """SELECT * FROM promo_codes
                WHERE code = ? AND uses_left > 0
@@ -639,7 +639,7 @@ async def promo_check(message: Message, state: FSMContext):
 # ════════════════════════════════════════════════════════
 async def send_premium_reminders(bot):
     """3 kun va 1 kun qolganda eslatma yuborish"""
-    async with await get_db() as db:
+    async with get_db() as db:
         for days_left in [3, 1]:
             target_date = (datetime.now() + timedelta(days=days_left)).strftime("%Y-%m-%d")
             async with db.execute(
@@ -670,7 +670,7 @@ async def send_premium_reminders(bot):
 async def deactivate_expired_premium():
     """Muddati tugagan premiumlarni o'chirish"""
     today = datetime.now().strftime("%Y-%m-%d")
-    async with await get_db() as db:
+    async with get_db() as db:
         await db.execute(
             """UPDATE users SET is_premium = 0, premium_until = NULL
                WHERE is_premium = 1 AND premium_until < ?""",

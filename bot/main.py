@@ -7,6 +7,7 @@ from bot.config import BOT_TOKEN
 from bot.database.db import init_db
 from bot.handlers import user, movie, admin, premium
 from bot.middlewares.auth import AuthMiddleware
+from bot.utils.scheduler import setup_scheduler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,6 +34,9 @@ async def main():
     dp.include_router(movie.router)
     dp.include_router(admin.router)
     dp.include_router(premium.router)
+
+    # Scheduler-ni ishga tushirish
+    setup_scheduler(bot)
 
     print("🤖 Bot ishga tushdi!")
     await dp.start_polling(bot, skip_updates=True)

@@ -318,7 +318,7 @@ async def cb_my_points(call: CallbackQuery):
     msg = txt(
         f"💰 <b>Sizning ballingiz</b>\n\n"
         f"🏅 Jami ball: <b>{user['balance']}</b>\n"
-        f"\n📜 <b>Oxirgi operatsiyalar:</b>{log_text or chr(10) + '  (bo'sh)'}",
+        f"\n📜 <b>Oxirgi operatsiyalar:</b>{log_text or chr(10) + '  (bósh)'}",
 
         f"💰 <b>Ваши баллы</b>\n\n"
         f"🏅 Всего баллов: <b>{user['balance']}</b>\n"

@@ -224,4 +224,14 @@ async def run_migrations() -> None:
 
         await db.commit()
 
+        # ── Settings default qiymatlari (migration sifatida) ──────────
+        await db.executemany(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+            [
+                ("card_number", "0000 0000 0000 0000"),
+                ("card_owner",  "Bot Admin"),
+            ]
+        )
+        await db.commit()
+
     logger.info("✅ Migrationlar muvaffaqiyatli bajarildi.")

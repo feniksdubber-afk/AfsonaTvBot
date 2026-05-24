@@ -314,8 +314,12 @@ async def _create_tables(db: aiosqlite.Connection) -> None:
     await db.executescript(CREATE_TABLES)
 
     # Default sozlamalar
-    await db.execute(
+    await db.executemany(
         "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
-        ("required_channels", "[]")
+        [
+            ("required_channels", "[]"),
+            ("card_number",  "0000 0000 0000 0000"),
+            ("card_owner",   "Bot Admin"),
+        ]
     )
     await db.commit()

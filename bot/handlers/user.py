@@ -40,18 +40,24 @@ async def cmd_start(message: Message):
     user = await get_user(message.from_user.id)
     lang = user["lang"] if user else "uz"
 
-    # Referral tekshirish
-    args = message.text.split()
-    if len(args) > 1:
-        ref_code = args[1]
-        if ref_code.startswith("ref_"):
-            code = ref_code[4:]
-            async with get_db() as db:
+    args_list = message.text.split() if message.text else []
+
+    # ── Referral tekshirish ──────────────────────────────
+    if len(args_list) > 1 and args_list[1].startswith("ref_"):
+        code = args_list[1][4:]
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT tg_id FROM users WHERE referral_code = ?", (code,)
+            ) as cur:
+                inviter = await cur.fetchone()
+            if inviter and inviter[0] != message.from_user.id:
+                # Faqat bir marta referral bo'lsin
                 async with db.execute(
-                    "SELECT tg_id FROM users WHERE referral_code = ?", (code,)
+                    "SELECT referred_by FROM users WHERE tg_id = ?",
+                    (message.from_user.id,)
                 ) as cur:
-                    inviter = await cur.fetchone()
-                if inviter and inviter[0] != message.from_user.id:
+                    row = await cur.fetchone()
+                if row and row[0] is None:
                     await db.execute(
                         "UPDATE users SET referred_by = ? WHERE tg_id = ?",
                         (inviter[0], message.from_user.id)
@@ -62,15 +68,22 @@ async def cmd_start(message: Message):
                     )
                     await db.commit()
 
-    # ── movie_ deep link — inline qidiruvdan kelgan ────────────────
-    args_list = message.text.split() if message.text else []
+    # ── movie_ deep link ────────────────────────────────
+    # TUZATISH #3: handle_movie_deeplink inline_search.py da yo'q edi.
+    # Endi to'g'ridan-to'g'ri shu yerda ishlov beramiz.
     if len(args_list) > 1 and args_list[1].startswith("movie_"):
         code = args_list[1][6:]  # "movie_" ni olib tashlash
-        from bot.handlers.inline_search import handle_movie_deeplink
-        await handle_movie_deeplink(message, code)
+        await _send_movie_by_code(message, code)
         return
 
-    # ── premium deep link ────────────────────────────────────────────
+    # ── series_ deep link ───────────────────────────────
+    if len(args_list) > 1 and args_list[1].startswith("series_"):
+        code = args_list[1][7:]  # "series_" ni olib tashlash
+        await _send_series_by_code(message, code)
+        return
+
+    # ── premium deep link ───────────────────────────────
+    # TUZATISH #1: show_premium_menu mavjud emas edi, to'g'ri nom — show_premium
     if len(args_list) > 1 and args_list[1] == "premium":
         from bot.handlers.premium import show_premium
         await show_premium(message)
@@ -88,6 +101,81 @@ async def cmd_start(message: Message):
     )
 
     await message.answer(greeting, reply_markup=main_menu(lang), parse_mode="HTML")
+
+
+# ── Deep link yordamchi funksiyalari ───────────────────
+async def _send_movie_by_code(message: Message, code: str):
+    """Kino kodiga ko'ra filmni yuboradi."""
+    async with get_db() as db:
+        async with db.execute("SELECT * FROM movies WHERE code = ?", (code,)) as cur:
+            row = await cur.fetchone()
+            if not row:
+                await message.answer("❌ Kontent topilmadi yoki o'chirilgan!")
+                return
+            cols = [d[0] for d in cur.description]
+            m = dict(zip(cols, row))
+
+    if m.get("status") == "deleted":
+        await message.answer("❌ Kontent topilmadi!")
+        return
+    if m.get("status") == "archived":
+        await message.answer("⛔ Bu kontent vaqtinchalik arxivda.")
+        return
+
+    title_display = m.get("title_uz") or m.get("title") or "Nomsiz kino"
+    caption = (
+        f"🎬 <b>{title_display}</b> ({m.get('year', '?')})\n"
+        f"🎭 {m.get('genres') or m.get('genre', '')}\n"
+        f"🌍 {m.get('country', '')}\n\n"
+        f"🍿 {m.get('description', '')}"
+    )
+
+    async with get_db() as db:
+        await db.execute("UPDATE movies SET views = views + 1 WHERE id = ?", (m["id"],))
+        await db.commit()
+
+    await message.answer_video(video=m["file_id"], caption=caption, parse_mode="HTML")
+
+
+async def _send_series_by_code(message: Message, code: str):
+    """Serial kodiga ko'ra serial ma'lumotini yuboradi."""
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    async with get_db() as db:
+        async with db.execute("SELECT * FROM series WHERE code = ?", (code,)) as cur:
+            row = await cur.fetchone()
+            if not row:
+                await message.answer("❌ Serial topilmadi!")
+                return
+            cols = [d[0] for d in cur.description]
+            s = dict(zip(cols, row))
+
+        async with db.execute(
+            "SELECT season_number FROM seasons WHERE series_id = ? ORDER BY season_number",
+            (s["id"],)
+        ) as cur:
+            seasons = await cur.fetchall()
+
+    if s["status"] == "deleted":
+        await message.answer("❌ Kontent topilmadi!")
+        return
+    if s["status"] == "archived":
+        await message.answer("⛔ Bu kontent vaqtinchalik arxivda.")
+        return
+
+    kb_buttons = [
+        [InlineKeyboardButton(text=f"📀 {row[0]}-Fasl", callback_data=f"show_season_{s['id']}_{row[0]}")]
+        for row in seasons
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=kb_buttons)
+    caption = (
+        f"📺 <b>{s['title_uz']}</b> ({s['year']})\n"
+        f"🎭 Janr: {s['genres']}\n"
+        f"🌍 Davlat: {s['country']}\n\n"
+        f"🍿 {s['description']}\n\n"
+        f"👇 Faslni tanlang:"
+    )
+    await message.answer_photo(photo=s["poster_file_id"], caption=caption, reply_markup=kb, parse_mode="HTML")
 
 
 # ── Profil ─────────────────────────────────────────────
@@ -163,9 +251,7 @@ async def set_lang(call: CallbackQuery):
     msg = "✅ Til o'zgartirildi!" if new_lang == "uz" else "✅ Язык изменён!"
     await call.answer(msg)
     await call.message.delete()
-    await call.message.answer(
-        msg, reply_markup=main_menu(new_lang)
-    )
+    await call.message.answer(msg, reply_markup=main_menu(new_lang))
 
 
 # ── Bildirishnoma ──────────────────────────────────────

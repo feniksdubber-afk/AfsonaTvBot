@@ -932,11 +932,9 @@ async def msg_user_send(message: Message, state: FSMContext):
 #  🔧 SOZLAMALAR — Karta raqami va obuna narxlari
 # ══════════════════════════════════════════════════════════════════════
 class SettingsState(StatesGroup):
-    waiting_card_number   = State()
-    waiting_card_owner    = State()
-    waiting_tariff_price  = State()
-    waiting_tariff_duration = State()
-    tariff_id             = State()
+    waiting_card_number    = State()
+    waiting_card_owner     = State()
+    waiting_tariff_edit    = State()
 
 
 def _settings_kb():
@@ -1046,55 +1044,62 @@ async def edit_tariff_start(call: CallbackQuery, state: FSMContext):
         return
 
     tid, name, duration, price = row
-    await state.update_data(tariff_id=tid, tariff_name=name)
-    await state.set_state(SettingsState.waiting_tariff_price)
+    await state.update_data(tariff_id=tid)
+    await state.set_state(SettingsState.waiting_tariff_edit)
     await call.message.answer(
         f"⭐ <b>{name}</b>\n"
         f"📅 Hozirgi muddat: <b>{duration} kun</b>\n"
         f"💰 Hozirgi narx: <b>{price:,} so'm</b>\n\n"
-        f"1️⃣ Yangi <b>narxni</b> yuboring (faqat raqam, so'mda):\n"
-        f"Misol: <code>29900</code>\n\n"
-        f"O'zgartirmaslik uchun <code>0</code> yuboring:",
+        f"Yangi narx va muddatni <b>bitta xabarda</b> yuboring:\n\n"
+        f"📝 Format: <code>narx, X kun</code>\n"
+        f"Misol: <code>5,000, 3 kun</code>\n\n"
+        f"Faqat narx: <code>5,000</code>\n"
+        f"Faqat muddat: <code>3 kun</code>",
         parse_mode="HTML"
     )
     await call.answer()
 
 
-@router.message(SettingsState.waiting_tariff_price, F.from_user.id.in_(ADMINS))
-async def edit_tariff_price(message: Message, state: FSMContext):
-    val = (message.text or "").strip().replace(" ", "").replace(",", "")
-    if not val.isdigit():
-        await message.answer("❌ Faqat raqam kiriting!\nMisol: <code>29900</code>", parse_mode="HTML")
+@router.message(SettingsState.waiting_tariff_edit, F.from_user.id.in_(ADMINS))
+async def edit_tariff_save(message: Message, state: FSMContext):
+    import re
+    text = (message.text or "").strip()
+    data = await state.get_data()
+    tariff_id = data.get("tariff_id")
+
+    # Narxni ajratib olish: raqam (vergul va bo'sh joy bilan yozilishi mumkin)
+    # "kun" so'zi bo'lmagan raqam = narx
+    # "X kun" ko'rinishi = muddat
+    new_price = None
+    new_duration = None
+
+    # "X kun" formatini qidirish
+    dur_match = re.search(r'(\d+)\s*kun', text, re.IGNORECASE)
+    if dur_match:
+        new_duration = int(dur_match.group(1))
+
+    # Narxni qidirish: vergul/bo'sh joy bo'lishi mumkin, "kun" bo'lmagan raqam
+    # "kun" so'zidan oldin kelgan raqamni olib tashlaymiz, qolgan raqamlar narx
+    text_no_dur = re.sub(r'\d+\s*kun', '', text, flags=re.IGNORECASE)
+    price_match = re.search(r'[\d,\s]+', text_no_dur)
+    if price_match:
+        price_str = price_match.group().replace(',', '').replace(' ', '').strip()
+        if price_str.isdigit() and int(price_str) > 0:
+            new_price = int(price_str)
+
+    if new_price is None and new_duration is None:
+        await message.answer(
+            "❌ Format noto'g'ri!\n\n"
+            "📝 To'g'ri formatlar:\n"
+            "<code>5,000, 3 kun</code> — narx va muddat\n"
+            "<code>5,000</code> — faqat narx\n"
+            "<code>3 kun</code> — faqat muddat",
+            parse_mode="HTML"
+        )
         return
 
-    await state.update_data(new_price=int(val))
-    await state.set_state(SettingsState.waiting_tariff_duration)
-
-    data = await state.get_data()
-    name = data.get("tariff_name", "Tarif")
-    await message.answer(
-        f"2️⃣ Yangi <b>muddatni</b> yuboring (kun hisobida):\n"
-        f"Misol: <code>30</code> (1 oy), <code>90</code> (3 oy), <code>365</code> (1 yil)\n\n"
-        f"O'zgartirmaslik uchun <code>0</code> yuboring:",
-        parse_mode="HTML"
-    )
-
-
-@router.message(SettingsState.waiting_tariff_duration, F.from_user.id.in_(ADMINS))
-async def edit_tariff_duration(message: Message, state: FSMContext):
-    val = (message.text or "").strip().replace(" ", "")
-    if not val.isdigit():
-        await message.answer("❌ Faqat raqam kiriting (kun)!\nMisol: <code>30</code>", parse_mode="HTML")
-        return
-
-    data = await state.get_data()
     await state.clear()
 
-    tariff_id   = data.get("tariff_id")
-    new_price    = data.get("new_price", 0)
-    new_duration = int(val)
-
-    # Hozirgi qiymatlarni olamiz
     async with get_db() as db:
         async with db.execute("SELECT name, duration, price FROM tariffs WHERE id = ?", (tariff_id,)) as cur:
             row = await cur.fetchone()
@@ -1104,8 +1109,8 @@ async def edit_tariff_duration(message: Message, state: FSMContext):
         return
 
     old_name, old_duration, old_price = row
-    final_price    = new_price    if new_price    > 0 else old_price
-    final_duration = new_duration if new_duration > 0 else old_duration
+    final_price    = new_price    if new_price    else old_price
+    final_duration = new_duration if new_duration else old_duration
 
     async with get_db() as db:
         await db.execute(
@@ -1115,12 +1120,12 @@ async def edit_tariff_duration(message: Message, state: FSMContext):
         await db.commit()
 
     changes = []
-    if new_price > 0:
+    if new_price:
         changes.append(f"💰 Narx: <b>{old_price:,}</b> → <b>{final_price:,} so'm</b>")
-    if new_duration > 0:
+    if new_duration:
         changes.append(f"📅 Muddat: <b>{old_duration}</b> → <b>{final_duration} kun</b>")
 
-    change_text = "\n".join(changes) if changes else "⚠️ Hech narsa o'zgartirilmadi."
+    change_text = "\n".join(changes)
     await message.answer(
         f"✅ <b>{old_name}</b> tarifi yangilandi:\n\n{change_text}",
         parse_mode="HTML",

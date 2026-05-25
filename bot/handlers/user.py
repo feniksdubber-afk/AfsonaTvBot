@@ -937,6 +937,7 @@ async def handle_movie_code(message: Message):
     lang = user["lang"] if user else "uz"
 
     # Avval movie jadvalida qidirish
+    movie = None  # FIX: UnboundLocalError oldini olish
     async with get_db() as db:
         async with db.execute(
             "SELECT * FROM movies WHERE code = ? AND status = 'active'", (code,)

@@ -156,6 +156,19 @@ CREATE TABLE IF NOT EXISTS comments (
 );
 
 -- ════════════════════════════════════════════
+--  LIKE / DISLIKE REAKSIYALAR
+-- ════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS movie_reactions (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id  INTEGER NOT NULL,
+    movie_id INTEGER NOT NULL,
+    reaction TEXT    NOT NULL CHECK(reaction IN ('like','dislike')),
+    UNIQUE(user_id, movie_id),
+    FOREIGN KEY (user_id)  REFERENCES users(tg_id) ON DELETE CASCADE,
+    FOREIGN KEY (movie_id) REFERENCES movies(id)   ON DELETE CASCADE
+);
+
+-- ════════════════════════════════════════════
 --  REYTINGLAR
 -- ════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS user_ratings (

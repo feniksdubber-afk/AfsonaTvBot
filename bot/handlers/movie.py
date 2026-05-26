@@ -25,6 +25,7 @@ from aiogram.types import (
 )
 
 from bot.database.db import get_db
+from bot.utils.helpers import get_protect_setting
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -290,6 +291,7 @@ async def cb_play_selected_episode(call: CallbackQuery):
     season_label  = _txt(f"{season}-fasl",   f"{season}-й сезон",   lang)
     episode_label = _txt(f"{episode}-qism",  f"{episode}-я серия",  lang)
 
+    protect = await get_protect_setting()
     try:
         await call.message.answer_video(
             video=file_id,
@@ -298,7 +300,7 @@ async def cb_play_selected_episode(call: CallbackQuery):
                 f"📀 {season_label} | {episode_label}"
             ),
             parse_mode="HTML",
-            protect_content=True
+            protect_content=protect
         )
     except Exception as e:
         logger.error("Video yuborishda xato (ep_id=%s): %s", ep_id, e)

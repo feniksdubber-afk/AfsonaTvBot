@@ -43,14 +43,16 @@ class TariffEditState(StatesGroup):
     waiting_duration = State() # yangi muddat kutilmoqda
 
 
-def _settings_kb():
+def _settings_kb(protect_on: bool = True):
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    protect_text = "🔒 Nusxa olish: O'CHIRILGAN ✅" if protect_on else "🔓 Nusxa olish: YOQILGAN ❌"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💳 Karta raqami",  callback_data="set_card_number")],
         [InlineKeyboardButton(text="👤 Karta egasi",   callback_data="set_card_owner")],
         [InlineKeyboardButton(text="💰 Tarif narxlari", callback_data="set_tariffs")],
         [InlineKeyboardButton(text="🔎 OMDb API kalit", callback_data="set_omdb_key")],
         [InlineKeyboardButton(text="💎 Ball narxlari",  callback_data="set_points_tariffs")],
+        [InlineKeyboardButton(text=protect_text,        callback_data="toggle_protect_content")],
         [InlineKeyboardButton(text="❌ Yopish",        callback_data="close_settings")],
     ])
 
@@ -58,20 +60,25 @@ def _settings_kb():
 @router.message(F.text == "🔧 Sozlamalar", F.from_user.id.in_(ADMINS))
 async def admin_settings(message: Message):
     async with get_db() as db:
-        async with db.execute("SELECT key, value FROM settings WHERE key IN ('card_number','card_owner')") as cur:
+        async with db.execute(
+            "SELECT key, value FROM settings WHERE key IN ('card_number','card_owner','protect_content')"
+        ) as cur:
             rows = await cur.fetchall()
 
     s = dict(rows)
     card_num   = s.get("card_number", "—")
     card_owner = s.get("card_owner",  "—")
+    protect_on = s.get("protect_content", "1") == "1"
+    protect_status = "🔒 O'chirilgan (himoyalangan)" if protect_on else "🔓 Yoqilgan (nusxa olish mumkin)"
 
     text = (
         f"🔧 <b>Sozlamalar</b>\n\n"
         f"💳 Karta raqami: <code>{card_num}</code>\n"
-        f"👤 Karta egasi: <b>{card_owner}</b>\n\n"
+        f"👤 Karta egasi: <b>{card_owner}</b>\n"
+        f"📋 Nusxa olish/Yuborish: {protect_status}\n\n"
         f"Tahrirlash uchun tugmani bosing:"
     )
-    await message.answer(text, reply_markup=_settings_kb(), parse_mode="HTML")
+    await message.answer(text, reply_markup=_settings_kb(protect_on), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "set_card_number", F.from_user.id.in_(ADMINS))
@@ -318,6 +325,44 @@ async def tariff_dur_save(message: Message, state: FSMContext):
         parse_mode="HTML",
         reply_markup=_tariff_edit_kb(tariff_id)
     )
+
+
+@router.callback_query(F.data == "toggle_protect_content", F.from_user.id.in_(ADMINS))
+async def toggle_protect_content(call: CallbackQuery):
+    """Protect content sozlamasini yoqish/o'chirish."""
+    async with get_db() as db:
+        async with db.execute("SELECT value FROM settings WHERE key = 'protect_content'") as cur:
+            row = await cur.fetchone()
+        current = (row[0] if row else "1")
+        new_val = "0" if current == "1" else "1"
+        await db.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('protect_content', ?)",
+            (new_val,)
+        )
+        await db.commit()
+
+        async with db.execute(
+            "SELECT key, value FROM settings WHERE key IN ('card_number','card_owner','protect_content')"
+        ) as cur:
+            rows = await cur.fetchall()
+
+    s = dict(rows)
+    protect_on = s.get("protect_content", "1") == "1"
+    protect_status = "🔒 O'chirilgan (himoyalangan)" if protect_on else "🔓 Yoqilgan (nusxa olish mumkin)"
+
+    text = (
+        f"🔧 <b>Sozlamalar</b>\n\n"
+        f"💳 Karta raqami: <code>{s.get('card_number', '—')}</code>\n"
+        f"👤 Karta egasi: <b>{s.get('card_owner', '—')}</b>\n"
+        f"📋 Nusxa olish/Yuborish: {protect_status}\n\n"
+        f"Tahrirlash uchun tugmani bosing:"
+    )
+    status_msg = "✅ Nusxa olish o'chirildi (himoyalandi)" if protect_on else "✅ Nusxa olish yoqildi"
+    await call.answer(status_msg, show_alert=True)
+    try:
+        await call.message.edit_text(text, reply_markup=_settings_kb(protect_on), parse_mode="HTML")
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data == "close_settings", F.from_user.id.in_(ADMINS))

@@ -30,7 +30,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 from bot.config import ADMINS
 from bot.database.db import get_db
-from bot.utils.helpers import get_user, txt, is_admin
+from bot.utils.helpers import get_user, txt, is_admin, get_protect_setting
 from bot.keyboards.user_kb import (
     main_menu, profile_kb, lang_kb,
     notify_kb, back_kb, cancel_kb, content_menu_kb,
@@ -236,13 +236,14 @@ async def _send_movie_by_code(message: Message, code: str, lang: str = "uz", use
     # Franshiza qismlarini tekshirish (#3)
     from bot.handlers.franchise import get_movie_parts, franchise_parts_kb
     parts = await get_movie_parts(m["id"])
+    protect = await get_protect_setting()
     if parts:
         fparts_kb = franchise_parts_kb(m["id"], parts, lang)
         await message.answer_video(
             video=m["file_id"],
             caption=caption + f"\n\n🎞 Bu filmning <b>{len(parts)}</b> ta qismi mavjud:",
             parse_mode="HTML",
-            protect_content=True,
+            protect_content=protect,
             reply_markup=fparts_kb
         )
     else:
@@ -251,7 +252,7 @@ async def _send_movie_by_code(message: Message, code: str, lang: str = "uz", use
             video=m["file_id"],
             caption=caption,
             parse_mode="HTML",
-            protect_content=True,
+            protect_content=protect,
             reply_markup=kb
         )
 
@@ -357,6 +358,7 @@ async def _send_series_by_code(message: Message, code: str, lang: str = "uz", us
     kb = InlineKeyboardMarkup(inline_keyboard=kb_list)
 
     # FIX #9: poster_file_id None bo'lsa answer_photo xato bermasligi
+    protect = await get_protect_setting()
     try:
         if s.get("poster_file_id"):
             await message.answer_photo(
@@ -364,7 +366,7 @@ async def _send_series_by_code(message: Message, code: str, lang: str = "uz", us
                 caption=caption,
                 reply_markup=kb,
                 parse_mode="HTML",
-                protect_content=True
+                protect_content=protect
             )
         else:
             await message.answer(caption, reply_markup=kb, parse_mode="HTML")

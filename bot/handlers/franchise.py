@@ -222,6 +222,117 @@ async def franchise_video(message: Message, state: FSMContext, bot: Bot):
     )
 
 
+
+# ══════════════════════════════════════════════════════════════════
+#  A2. INLINE TUGMALAR ORQALI QO'SHISH (admin_content_list dan)
+# ══════════════════════════════════════════════════════════════════
+
+@router.callback_query(F.data.startswith("add_franchise_part_"), F.from_user.id.in_(ADMINS))
+async def cb_add_franchise_part(call: CallbackQuery, state: FSMContext):
+    """'🎞 Franshiza qism qo'shish' tugmasi bosilganda — movie_id oldindan ma'lum."""
+    movie_id = int(call.data.split("_")[-1])
+
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT title_uz, status, code FROM movies WHERE id = ?", (movie_id,)
+        ) as cur:
+            row = await cur.fetchone()
+
+    if not row:
+        await call.answer("❌ Film topilmadi!", show_alert=True)
+        return
+    if row[1] == "deleted":
+        await call.answer("❌ Film o'chirilgan!", show_alert=True)
+        return
+
+    # Mavjud qismlar
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT part_num, title_uz FROM movie_parts WHERE movie_id = ? ORDER BY part_num",
+            (movie_id,)
+        ) as cur:
+            parts = await cur.fetchall()
+
+    parts_text = ""
+    if parts:
+        parts_text = "\n\n📋 Mavjud qismlar:\n" + "\n".join(
+            f"  {p[0]}-qism: {p[1] or '—'}" for p in parts
+        )
+
+    await state.update_data(movie_id=movie_id, movie_title=row[0])
+    await state.set_state(FranchiseAddState.waiting_part_num)
+
+    await call.message.answer(
+        f"🎞 <b>Franshizaga qism qo'shish</b>\n"
+        f"🎬 Film: <b>{row[0]}</b> (kod: <code>{row[2]}</code>){parts_text}\n\n"
+        f"📝 Yangi qismning raqamini yuboring (masalan: <code>2</code>):",
+        reply_markup=cancel_fsm_kb(),
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("add_series_episode_"), F.from_user.id.in_(ADMINS))
+async def cb_add_series_episode(call: CallbackQuery, state: FSMContext):
+    """'📺 Qism qo'shish' tugmasi bosilganda — series_id oldindan ma'lum."""
+    series_id = int(call.data.split("_")[-1])
+
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT title_uz, status, code FROM series WHERE id = ?", (series_id,)
+        ) as cur:
+            row = await cur.fetchone()
+
+    if not row:
+        await call.answer("❌ Serial topilmadi!", show_alert=True)
+        return
+    if row[1] == "deleted":
+        await call.answer("❌ Serial o'chirilgan!", show_alert=True)
+        return
+
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT season_number FROM seasons WHERE series_id = ? ORDER BY season_number",
+            (series_id,)
+        ) as cur:
+            seasons = await cur.fetchall()
+
+    await state.update_data(
+        series_id=series_id,
+        series_title=row[0],
+        series_code=row[2]
+    )
+    await state.set_state(SeriesAddEpisodeState.waiting_season)
+
+    seasons_text = "📋 Mavjud fasllar: " + ", ".join(str(s[0]) for s in seasons) if seasons else "📋 Hali fasl yo'q"
+    next_season = (seasons[-1][0] + 1) if seasons else 1
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        *[
+            [InlineKeyboardButton(
+                text=f"📀 {s[0]}-Faslga qo'shish",
+                callback_data=f"sae_season_{series_id}_{s[0]}"
+            )]
+            for s in seasons
+        ],
+        [InlineKeyboardButton(
+            text=f"➕ Yangi {next_season}-fasl ochish",
+            callback_data=f"sae_season_{series_id}_{next_season}_new"
+        )],
+        [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="cancel_admin_fsm")],
+    ])
+
+    await call.message.answer(
+        f"📺 <b>Serialga qism qo'shish</b>\n"
+        f"📺 Serial: <b>{row[0]}</b> (kod: <code>{row[2]}</code>)\n"
+        f"{seasons_text}\n\n"
+        f"Qaysi faslga qism qo'shmoqchisiz?",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+
 # ══════════════════════════════════════════════════════════════════
 #  B. SERIALGA QISM/FASL QO'SHISH — ADMIN
 # ══════════════════════════════════════════════════════════════════

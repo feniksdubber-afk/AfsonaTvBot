@@ -66,8 +66,21 @@ async def process_find_content_to_edit(message: Message, state: FSMContext):
     archive_txt = "📥 Arxivga olish" if status == "active" else "📤 Arxivdan chiqarish"
     archive_cb  = f"status_archive_{c_type}_{c_id}"
 
+    # Serial uchun "Qism qo'shish", Film uchun "Franshiza qism qo'shish" tugmasi
+    if is_movie:
+        add_btn = InlineKeyboardButton(
+            text="🎞 Franshiza qism qo'shish",
+            callback_data=f"add_franchise_part_{c_id}"
+        )
+    else:
+        add_btn = InlineKeyboardButton(
+            text="📺 Qism qo'shish",
+            callback_data=f"add_series_episode_{c_id}"
+        )
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✏️ To'liq tahrirlash", callback_data=f"full_edit_{c_type}_{c_id}")],
+        [add_btn],
         [
             InlineKeyboardButton(text=archive_txt, callback_data=archive_cb),
             InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"status_delete_{c_type}_{c_id}")

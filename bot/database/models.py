@@ -109,8 +109,8 @@ CREATE TABLE IF NOT EXISTS episodes (
 
 -- ════════════════════════════════════════════
 --  SEVIMLILAR
---  ESLATMA: NULL muammosi (NULL != NULL) migrations.py da
---           partial index orqali hal qilingan.
+--  ESLATMA: series_id uchun UNIQUE partial index
+--           migrations.py da yaratiladi (NULL != NULL muammosi).
 -- ════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS favorites (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,

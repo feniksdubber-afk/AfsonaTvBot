@@ -127,8 +127,12 @@ def premium_tariffs_kb(tariffs: list, lang: str = "uz") -> InlineKeyboardMarkup:
     buttons = []
     for t in tariffs:
         label = f"⭐ {t['name']} — {t['price']:,} so'm ({t['duration']} kun)"
-        # Tarif tanlash — to'g'ridan-to'g'ri karta to'loviga o'tadi
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"buy_tariff_{t['id']}")])
+    # #8: Ballga sotib olish tugmasi
+    has_points_tariff = any(t.get("points_price", 0) > 0 for t in tariffs)
+    if has_points_tariff:
+        pts_text = "💰 Balldan sotib olish" if lang == "uz" else "💰 Купить за баллы"
+        buttons.append([InlineKeyboardButton(text=pts_text, callback_data="buy_with_points_list")])
     cancel = "❌ Bekor qilish" if lang == "uz" else "❌ Отмена"
     buttons.append([InlineKeyboardButton(text=cancel, callback_data="cancel_premium")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

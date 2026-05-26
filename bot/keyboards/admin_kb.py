@@ -4,6 +4,7 @@ def admin_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🎬 Kino qo'shish"), KeyboardButton(text="✏️ Kontentni tahrirlash")],
+            [KeyboardButton(text="📺 Serialga qism qo'shish"), KeyboardButton(text="🎞 Franshizaga qism qo'shish")],
             [KeyboardButton(text="📋 Kinolar ro'yxati"), KeyboardButton(text="📢 Broadcast")],
             [KeyboardButton(text="👥 Foydalanuvchilar"), KeyboardButton(text="📊 Statistika")],
             [KeyboardButton(text="🔧 Sozlamalar"),    KeyboardButton(text="📨 Kino so'rovlar")],

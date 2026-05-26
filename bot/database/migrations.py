@@ -11,9 +11,11 @@ QOIDA:
   - Yangi ustun kerak bo'lsa   → _add_column() yordamida qo'shing
   - Hech qachon DROP yoki DELETE ishlatmang!
 
-TUZATILGAN:
-  - error_logs.handler ustuni qo'shildi (error_logger.py talab qiladi)
-  - favorites.series_id uchun partial unique index (NULL muammosi hal qilindi)
+YANGILANDI (v2):
+  - movie_parts jadvali qo'shildi (film franshizasi)
+  - tariffs.points_price ustuni qo'shildi (ballga premium)
+  - omdb_cache jadvali qo'shildi (OMDb natijalarini keshlash)
+  - admin full-edit uchun yangi FSM state lar shart emas (migration emas)
 """
 
 import logging
@@ -78,16 +80,52 @@ async def run_migrations() -> None:
         )
 
         # ── 4. error_logs.handler ─────────────────────────────────────
-        # TUZATILGAN: error_logger.py bu ustunni ishlatadi
         await _add_column(db, "error_logs", "handler", "TEXT")
 
-        # ── 5. settings — default qiymatlar ──────────────────────────
+        # ── 5. YANGI: tariffs.points_price — ballga premium (#8) ─────
+        await _add_column(db, "tariffs", "points_price", "INTEGER DEFAULT 0")
+
+        # ── 6. YANGI: movie_parts jadvali — film franshizasi (#3) ─────
+        try:
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS movie_parts (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    movie_id   INTEGER NOT NULL,
+                    part_num   INTEGER NOT NULL,
+                    title_uz   TEXT,
+                    title_ru   TEXT,
+                    file_id    TEXT    NOT NULL,
+                    created_at TEXT    DEFAULT (datetime('now')),
+                    UNIQUE(movie_id, part_num),
+                    FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE
+                )
+            """)
+            logger.info("Migration: movie_parts jadvali tayyor.")
+        except Exception:
+            pass
+
+        # ── 7. YANGI: omdb_cache jadvali — OMDb keshlash (#7) ────────
+        try:
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS omdb_cache (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    query      TEXT    UNIQUE NOT NULL,
+                    data       TEXT    NOT NULL,
+                    created_at TEXT    DEFAULT (datetime('now'))
+                )
+            """)
+            logger.info("Migration: omdb_cache jadvali tayyor.")
+        except Exception:
+            pass
+
+        # ── 8. settings — default qiymatlar ──────────────────────────
         await db.executemany(
             "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
             [
                 ("required_channels", "[]"),
                 ("card_number",  "0000 0000 0000 0000"),
                 ("card_owner",   "Bot Admin"),
+                ("omdb_api_key", ""),          # OMDb API key
             ]
         )
 

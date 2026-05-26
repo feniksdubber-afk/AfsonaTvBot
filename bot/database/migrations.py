@@ -70,7 +70,38 @@ async def run_migrations() -> None:
         # ── 3. favorites.series_id ────────────────────────────────────
         await _add_column(db, "favorites", "series_id", "INTEGER")
 
-        # Partial unique index: NULL != NULL muammosini hal qiladi
+        # Avval eski duplicate qatorlarni tozalaymiz (movie_id bo'yicha)
+        await db.execute("""
+            DELETE FROM favorites
+            WHERE movie_id IS NOT NULL
+              AND id NOT IN (
+                  SELECT MIN(id) FROM favorites
+                  WHERE movie_id IS NOT NULL
+                  GROUP BY user_id, movie_id
+              )
+        """)
+        # Eski duplicate qatorlarni tozalaymiz (series_id bo'yicha)
+        await db.execute("""
+            DELETE FROM favorites
+            WHERE series_id IS NOT NULL
+              AND id NOT IN (
+                  SELECT MIN(id) FROM favorites
+                  WHERE series_id IS NOT NULL
+                  GROUP BY user_id, series_id
+              )
+        """)
+        await db.commit()
+
+        # Partial unique index (movie_id): NULL != NULL muammosini hal qiladi
+        await _create_index(
+            db,
+            "idx_favorites_user_movie",
+            """CREATE UNIQUE INDEX IF NOT EXISTS idx_favorites_user_movie
+               ON favorites(user_id, movie_id)
+               WHERE movie_id IS NOT NULL"""
+        )
+
+        # Partial unique index (series_id): NULL != NULL muammosini hal qiladi
         await _create_index(
             db,
             "idx_favorites_user_series",

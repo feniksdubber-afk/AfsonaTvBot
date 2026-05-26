@@ -236,7 +236,7 @@ def _search_results_kb(results: list[dict], lang: str) -> InlineKeyboardMarkup:
         buttons.append([InlineKeyboardButton(text=label, callback_data=cb)])
 
     cancel_text = "❌ Bekor qilish" if lang == "uz" else "❌ Отмена"
-    buttons.append([InlineKeyboardButton(text=cancel_text, callback_data="cancel_input")])
+    buttons.append([InlineKeyboardButton(text=cancel_text, callback_data="omdb_cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -263,14 +263,20 @@ async def omdb_search_start(message: Message, state: FSMContext):
         return
 
     await state.set_state(OmdbSearchState.waiting_query)
-    from bot.keyboards.user_kb import cancel_kb
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    omdb_cancel_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="❌ Bekor qilish" if lang == "uz" else "❌ Отмена",
+            callback_data="omdb_cancel"
+        )
+    ]])
     await message.answer(
         _txt(
             "🔎 Kino yoki serial nomini yozing (inglizcha):\n\nMisol: <code>Inception</code>",
             "🔎 Введите название фильма или сериала (на английском):\n\nПример: <code>Inception</code>",
             lang,
         ),
-        reply_markup=cancel_kb(lang),
+        reply_markup=omdb_cancel_kb,
         parse_mode="HTML",
     )
 
@@ -600,7 +606,7 @@ async def omdb_add_save(call: CallbackQuery, state: FSMContext, bot: Bot):
 # ══════════════════════════════════════════════════════════════════
 #  BEKOR QILISH (OmdbAddState uchun)
 # ══════════════════════════════════════════════════════════════════
-@router.callback_query(F.data == "cancel_input")
+@router.callback_query(F.data == "omdb_cancel")
 async def cancel_omdb_input(call: CallbackQuery, state: FSMContext):
     current = await state.get_state()
     if current in (OmdbSearchState.waiting_query, OmdbAddState.waiting_video, OmdbAddState.waiting_premium):

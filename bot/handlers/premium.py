@@ -594,7 +594,7 @@ async def buy_with_points_list(call: CallbackQuery):
     await call.answer()
 
 
-@router.callback_query(F.data.startswith("buy_with_points_"))
+@router.callback_query(F.data.startswith("buy_with_points_") & ~F.data.in_({"buy_with_points_list"}))
 async def buy_with_points_confirm(call: CallbackQuery):
     """Balldan to'lov — tasdiqlash va faollashtirish."""
     tariff_id = int(call.data.split("_")[3])

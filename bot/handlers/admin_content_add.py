@@ -20,7 +20,7 @@ from aiogram.types import (
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-from bot.config import ADMINS, CHANNEL_PRIVATE
+from bot.config import ADMINS, CHANNEL_PRIVATE, CHANNEL_PUBLIC
 from bot.database.db import get_db
 from bot.keyboards import admin_kb as custom_admin_kb
 from bot.utils.admin_tools import generate_unique_code

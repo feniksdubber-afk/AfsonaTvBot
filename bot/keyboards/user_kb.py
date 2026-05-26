@@ -189,7 +189,7 @@ def content_menu_kb(lang: str = "uz") -> InlineKeyboardMarkup:
 
 
 def movie_view_kb(movie_id: int, code: str, is_fav: bool,
-                  lang: str = "uz") -> InlineKeyboardMarkup:
+                  lang: str = "uz", bot_username: str = "") -> InlineKeyboardMarkup:
     """Kino ko'rsatilganda chiqadigan tugmalar."""
     fav_text = (
         ("❤️ Sevimlilardan olib tashlash" if is_fav else "🤍 Sevimlilarga qo'shish")
@@ -197,13 +197,14 @@ def movie_view_kb(movie_id: int, code: str, is_fav: bool,
         ("❤️ Убрать из избранного" if is_fav else "🤍 Добавить в избранное")
     )
     watch_text = "▶️ Tomosha qilish" if lang == "uz" else "▶️ Смотреть"
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
+    buttons = []
+    if bot_username:
+        buttons.append([InlineKeyboardButton(
             text=watch_text,
-            url=f"https://t.me/{{bot_username}}?start=movie_{code}"
-        )],
-        [InlineKeyboardButton(text=fav_text, callback_data=f"fav_toggle_{movie_id}")],
-    ])
+            url=f"https://t.me/{bot_username}?start=movie_{code}"
+        )])
+    buttons.append([InlineKeyboardButton(text=fav_text, callback_data=f"fav_toggle_{movie_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def series_view_kb(series_id: int, code: str, is_fav: bool,
                    lang: str = "uz") -> InlineKeyboardMarkup:

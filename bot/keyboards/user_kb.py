@@ -196,6 +196,7 @@ def movie_view_kb(movie_id: int, code: str, is_fav: bool,
         if lang == "uz" else
         ("❤️ Убрать из избранного" if is_fav else "🤍 Добавить в избранное")
     )
+    share_text = "📤 Kinoni ulashish" if lang == "uz" else "📤 Поделиться фильмом"
     watch_text = "▶️ Tomosha qilish" if lang == "uz" else "▶️ Смотреть"
     buttons = []
     if bot_username:
@@ -204,6 +205,11 @@ def movie_view_kb(movie_id: int, code: str, is_fav: bool,
             url=f"https://t.me/{bot_username}?start=movie_{code}"
         )])
     buttons.append([InlineKeyboardButton(text=fav_text, callback_data=f"fav_toggle_{movie_id}")])
+    if code:
+        buttons.append([InlineKeyboardButton(
+            text=share_text,
+            callback_data=f"share_movie_{code}"
+        )])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def series_view_kb(series_id: int, code: str, is_fav: bool,
@@ -214,12 +220,19 @@ def series_view_kb(series_id: int, code: str, is_fav: bool,
         if lang == "uz" else
         ("❤️ Убрать из избранного" if is_fav else "🤍 Добавить в избранное")
     )
+    share_text = "📤 Serialni ulashish" if lang == "uz" else "📤 Поделиться сериалом"
     watch_text = "▶️ Tomosha qilish" if lang == "uz" else "▶️ Смотреть"
-    return InlineKeyboardMarkup(inline_keyboard=[
+    buttons = [
         [InlineKeyboardButton(
             text=watch_text,
             callback_data=f"watch_series_{series_id}"
         )],
         [InlineKeyboardButton(text=fav_text, callback_data=f"fav_series_{series_id}")],
-    ])
+    ]
+    if code:
+        buttons.append([InlineKeyboardButton(
+            text=share_text,
+            callback_data=f"share_series_{code}"
+        )])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 

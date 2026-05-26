@@ -530,6 +530,7 @@ async def referral(call: CallbackQuery):
 #  SEVIMLILAR
 # ══════════════════════════════════════════════════════════════════════
 @router.callback_query(F.data == "favorites")
+@router.callback_query(F.data.startswith("favorites_page_"))
 async def show_favorites(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     if not user:
@@ -537,54 +538,99 @@ async def show_favorites(call: CallbackQuery):
         return
     lang = user["lang"]
 
+    # Sahifa raqami
+    page = 0
+    if call.data.startswith("favorites_page_"):
+        try:
+            page = int(call.data.split("_")[2])
+        except (IndexError, ValueError):
+            page = 0
+
+    PAGE_SIZE = 10
+
     async with get_db() as db:
+        # Kino va seriallarni bitta so'rovda olamiz, added_at bo'yicha saralanadi
         async with db.execute(
             """SELECT COALESCE(m.title_uz, m.title, 'Nomsiz') AS title,
-                      m.code, 'movie' AS content_type
+                      m.code, 'movie' AS ctype, f.movie_id AS item_id, f.added_at
                FROM favorites f
                JOIN movies m ON f.movie_id = m.id
-               WHERE f.user_id = ? AND m.status = 'active'
-               ORDER BY f.added_at DESC LIMIT 10""",
-            (user["tg_id"],)
-        ) as cur:
-            movie_rows = await cur.fetchall()
-
-        async with db.execute(
-            """SELECT COALESCE(s.title_uz, 'Nomsiz serial') AS title,
-                      s.code, 'series' AS content_type
+               WHERE f.user_id = ? AND m.status = 'active' AND f.movie_id IS NOT NULL
+               UNION ALL
+               SELECT COALESCE(s.title_uz, 'Nomsiz serial') AS title,
+                      s.code, 'series' AS ctype, f.series_id AS item_id, f.added_at
                FROM favorites f
                JOIN series s ON f.series_id = s.id
-               WHERE f.user_id = ? AND s.status = 'active'
-               ORDER BY f.added_at DESC LIMIT 10""",
-            (user["tg_id"],)
+               WHERE f.user_id = ? AND s.status = 'active' AND f.series_id IS NOT NULL
+               ORDER BY added_at DESC""",
+            (user["tg_id"], user["tg_id"])
         ) as cur:
-            series_rows = await cur.fetchall()
+            all_items = await cur.fetchall()
 
-    all_items = list(movie_rows) + list(series_rows)
+    total = len(all_items)
+    page_items = all_items[page * PAGE_SIZE : (page + 1) * PAGE_SIZE]
 
-    if not all_items:
+    if not page_items:
         text = txt("❤️ Sevimlilar bo'sh.", "❤️ Избранное пусто.", lang)
         await call.message.edit_text(text, reply_markup=back_kb(), parse_mode="HTML")
         await call.answer()
         return
 
-    lines = []
-    for title, code, ctype in all_items:
+    # Har bir kino/serial uchun alohida tugma
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    buttons = []
+    for title, code, ctype, item_id, _ in page_items:
         icon = "🎬" if ctype == "movie" else "📺"
-        lines.append(f"{icon} <code>{code}</code> — {title}")
+        cb = f"fav_open_movie_{code}" if ctype == "movie" else f"fav_open_series_{code}"
+        buttons.append([InlineKeyboardButton(text=f"{icon} {title}", callback_data=cb)])
 
-    hint = txt(
-        "Kino/serial kodini yuboring — bot ko'rsatadi.",
-        "Отправьте код фильма/сериала — бот покажет.",
+    # Sahifalash tugmalari
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(
+            text="⬅️ Oldingi",
+            callback_data=f"favorites_page_{page - 1}"
+        ))
+    if (page + 1) * PAGE_SIZE < total:
+        nav.append(InlineKeyboardButton(
+            text="Keyingi ➡️",
+            callback_data=f"favorites_page_{page + 1}"
+        ))
+    if nav:
+        buttons.append(nav)
+
+    back_label = "◀️ Orqaga" if lang == "uz" else "◀️ Назад"
+    buttons.append([InlineKeyboardButton(text=back_label, callback_data="back_profile")])
+
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    start = page * PAGE_SIZE + 1
+    end = min(start + PAGE_SIZE - 1, total)
+    header = txt(
+        f"❤️ <b>Sevimlilar</b> ({start}–{end} / {total})",
+        f"❤️ <b>Избранное</b> ({start}–{end} / {total})",
         lang
     )
-    text = txt(
-        f"❤️ <b>Sevimlilar</b>\n\n" + "\n".join(lines) + f"\n\n{hint}",
-        f"❤️ <b>Избранное</b>\n\n" + "\n".join(lines) + f"\n\n{hint}",
-        lang
-    )
-    await call.message.edit_text(text, reply_markup=back_kb(), parse_mode="HTML")
+    await call.message.edit_text(header, reply_markup=kb, parse_mode="HTML")
     await call.answer()
+
+
+@router.callback_query(F.data.startswith("fav_open_movie_"))
+async def fav_open_movie(call: CallbackQuery):
+    code = call.data.split("fav_open_movie_")[1]
+    user = await get_user(call.from_user.id)
+    lang = user["lang"] if user else "uz"
+    await call.answer()
+    await _send_movie_by_code(call.message, code, lang)
+
+
+@router.callback_query(F.data.startswith("fav_open_series_"))
+async def fav_open_series(call: CallbackQuery):
+    code = call.data.split("fav_open_series_")[1]
+    user = await get_user(call.from_user.id)
+    lang = user["lang"] if user else "uz"
+    await call.answer()
+    await _send_series_by_code(call.message, code, lang)
 
 
 # ══════════════════════════════════════════════════════════════════════

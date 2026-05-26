@@ -338,6 +338,7 @@ async def _create_tables(db: aiosqlite.Connection) -> None:
             ("required_channels", "[]"),
             ("card_number",  "0000 0000 0000 0000"),
             ("card_owner",   "Bot Admin"),
+            ("protect_content", "1"),
         ]
     )
     await db.commit()

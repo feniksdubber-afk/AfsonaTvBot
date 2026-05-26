@@ -1039,7 +1039,10 @@ async def support_reply_start(call: CallbackQuery, state: FSMContext):
         await call.answer("❌ Ruxsat yo'q!", show_alert=True)
         return
 
-    user_id = int(call.data.split("_")[2])
+    # "support_reply_{user_id}" — user_id 10+ xonali bo'lishi mumkin
+    # split("_", 2) ishlatamiz: faqat 2 ta ajratish, qolganini saqlaymiz
+    parts = call.data.split("_", 2)
+    user_id = int(parts[2])
     await state.update_data(support_target=user_id)
     await state.set_state(SupportReplyState.waiting_reply)
     await call.message.answer(

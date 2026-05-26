@@ -385,12 +385,10 @@ async def promo_check(message: Message, state: FSMContext):
         promo = dict(zip([d[0] for d in cur.description], row))
 
         # Foydalanuvchi bu promokodni ishlatganmi tekshiramiz
-        # promo id ni negative qilib user_tasks ga yozish — noto'g'ri hack.
-        # To'g'ri: alohida ustun yoki promo_id orqali tekshirish.
-        # promo_id * -1 o'rniga promo_id + 100000 offset ishlatamiz (task_id < 0 bo'lmaydi).
+        # Alohida promo_uses jadvalidan tekshiramiz (user_tasks hack emas)
         async with db.execute(
-            "SELECT 1 FROM user_tasks WHERE user_id = ? AND task_id = ?",
-            (message.from_user.id, promo["id"] + 100000)
+            "SELECT 1 FROM promo_uses WHERE promo_id = ? AND user_id = ?",
+            (promo["id"], message.from_user.id)
         ) as cur:
             used = await cur.fetchone()
 
@@ -421,9 +419,10 @@ async def promo_check(message: Message, state: FSMContext):
         else:
             result_text = "✅ Promokod qabul qilindi."
 
+        # promo_uses jadvaliga yozamiz (haqiqiy kuzatish)
         await db.execute(
-            "INSERT OR IGNORE INTO user_tasks (user_id, task_id) VALUES (?, ?)",
-            (message.from_user.id, promo["id"] + 100000)
+            "INSERT OR IGNORE INTO promo_uses (promo_id, user_id) VALUES (?, ?)",
+            (promo["id"], message.from_user.id)
         )
         await db.execute(
             "UPDATE promo_codes SET uses_left = uses_left - 1 WHERE id = ?",

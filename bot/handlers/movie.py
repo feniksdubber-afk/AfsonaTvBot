@@ -153,19 +153,13 @@ def _series_caption(s: dict, lang: str) -> str:
 async def _add_watch_points(user_id: int) -> None:
     """
     Qism ko'rilganda foydalanuvchiga +2 ball beradi.
+    gamification.add_points orqali — point_log ga ham yoziladi.
     Xato bo'lsa asosiy funksiyani bloklamamaydi.
     """
     try:
-        async with get_db() as db:
-            await db.execute(
-                "UPDATE users SET balance = balance + 2 WHERE tg_id = ?",
-                (user_id,)
-            )
-            await db.execute(
-                "INSERT INTO point_log (user_id, amount, reason) VALUES (?, 2, 'watch_episode')",
-                (user_id,)
-            )
-            await db.commit()
+        from bot.handlers.gamification import add_points, tournament_add_points
+        await add_points(user_id, 2, reason="watch_episode")
+        await tournament_add_points(user_id, 2)
     except Exception as e:
         logger.warning("Ball qo'shishda xato (user_id=%s): %s", user_id, e)
 

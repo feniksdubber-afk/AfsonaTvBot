@@ -162,7 +162,7 @@ async def cmd_start(message: Message, state: FSMContext):
 # ══════════════════════════════════════════════════════════════════════
 #  DEEP LINK YORDAMCHI FUNKSIYALARI
 # ══════════════════════════════════════════════════════════════════════
-async def _send_movie_by_code(message: Message, code: str, lang: str = "uz"):
+async def _send_movie_by_code(message: Message, code: str, lang: str = "uz", user_id: int = None):
     async with get_db() as db:
         async with db.execute(
             "SELECT * FROM movies WHERE code = ?", (code,)
@@ -186,7 +186,8 @@ async def _send_movie_by_code(message: Message, code: str, lang: str = "uz"):
 
     # FIX #5: Premium kino tekshiruvi
     if m.get("is_premium"):
-        user = await get_user(message.from_user.id)
+        _uid = user_id or message.from_user.id
+        user = await get_user(_uid)
         if not (user and user.get("is_premium")):
             await message.answer(
                 txt(
@@ -220,7 +221,7 @@ async def _send_movie_by_code(message: Message, code: str, lang: str = "uz"):
         )
         await db.execute(
             "INSERT INTO watch_history (user_id, movie_id) VALUES (?, ?)",
-            (message.from_user.id, m["id"])
+            (user_id or message.from_user.id, m["id"])
         )
         await db.commit()
 
@@ -228,7 +229,7 @@ async def _send_movie_by_code(message: Message, code: str, lang: str = "uz"):
     async with get_db() as db:
         async with db.execute(
             "SELECT id FROM favorites WHERE user_id = ? AND movie_id = ?",
-            (message.from_user.id, m["id"])
+            (user_id or message.from_user.id, m["id"])
         ) as cur:
             is_fav = (await cur.fetchone()) is not None
 
@@ -255,7 +256,7 @@ async def _send_movie_by_code(message: Message, code: str, lang: str = "uz"):
         )
 
 
-async def _send_series_by_code(message: Message, code: str, lang: str = "uz"):
+async def _send_series_by_code(message: Message, code: str, lang: str = "uz", user_id: int = None):
     async with get_db() as db:
         async with db.execute(
             "SELECT * FROM series WHERE code = ?", (code,)
@@ -285,7 +286,8 @@ async def _send_series_by_code(message: Message, code: str, lang: str = "uz"):
 
     # FIX #5: Premium serial tekshiruvi
     if s.get("is_premium"):
-        user = await get_user(message.from_user.id)
+        _uid = user_id or message.from_user.id
+        user = await get_user(_uid)
         if not (user and user.get("is_premium")):
             await message.answer(
                 txt(
@@ -337,7 +339,7 @@ async def _send_series_by_code(message: Message, code: str, lang: str = "uz"):
         async with get_db() as db:
             async with db.execute(
                 "SELECT id FROM favorites WHERE user_id = ? AND series_id = ?",
-                (message.from_user.id, s["id"])
+                (user_id or message.from_user.id, s["id"])
             ) as cur:
                 is_fav = (await cur.fetchone()) is not None
     except Exception:
@@ -648,7 +650,7 @@ async def fav_open_movie(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     lang = user["lang"] if user else "uz"
     await call.answer()
-    await _send_movie_by_code(call.message, code, lang)
+    await _send_movie_by_code(call.message, code, lang, user_id=call.from_user.id)
 
 
 @router.callback_query(F.data.startswith("fav_open_series_"))
@@ -657,7 +659,7 @@ async def fav_open_series(call: CallbackQuery):
     user = await get_user(call.from_user.id)
     lang = user["lang"] if user else "uz"
     await call.answer()
-    await _send_series_by_code(call.message, code, lang)
+    await _send_series_by_code(call.message, code, lang, user_id=call.from_user.id)
 
 
 # ══════════════════════════════════════════════════════════════════════

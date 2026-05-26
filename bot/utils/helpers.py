@@ -40,3 +40,21 @@ async def get_user_lang(tg_id: int) -> str:
     """Foydalanuvchi tilini qaytaradi, topilmasa 'uz'."""
     u = await get_user(tg_id)
     return u["lang"] if u else "uz"
+
+
+async def get_protect_setting() -> bool:
+    """
+    settings jadvalidan 'protect_content' qiymatini o'qiydi.
+    True  → protect_content=True  (nusxa/yuborish bloklangan)
+    False → protect_content=False (nusxa/yuborish ruxsat etilgan)
+    Default: True (himoyalangan)
+    """
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT value FROM settings WHERE key = 'protect_content'"
+            ) as cur:
+                row = await cur.fetchone()
+        return (row[0] if row else "1") == "1"
+    except Exception:
+        return True

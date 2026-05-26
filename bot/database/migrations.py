@@ -104,7 +104,25 @@ async def run_migrations() -> None:
         except Exception:
             pass
 
-        # ── 7. YANGI: omdb_cache jadvali — OMDb keshlash (#7) ────────
+        # ── 7. YANGI: promo_uses jadvali — promokod ishlatilganini kuzatish ──
+        #    user_tasks ni noto'g'ri hack qilish o'rniga alohida jadval
+        try:
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS promo_uses (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    promo_id   INTEGER NOT NULL,
+                    user_id    INTEGER NOT NULL,
+                    used_at    TEXT    DEFAULT (datetime('now')),
+                    UNIQUE(promo_id, user_id),
+                    FOREIGN KEY (promo_id) REFERENCES promo_codes(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id)  REFERENCES users(tg_id)    ON DELETE CASCADE
+                )
+            """)
+            logger.info("Migration: promo_uses jadvali tayyor.")
+        except Exception:
+            pass
+
+        # ── 8. YANGI: omdb_cache jadvali — OMDb keshlash (#7) ────────
         try:
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS omdb_cache (
@@ -118,7 +136,7 @@ async def run_migrations() -> None:
         except Exception:
             pass
 
-        # ── 8. settings — default qiymatlar ──────────────────────────
+        # ── 9. settings — default qiymatlar ──────────────────────────
         await db.executemany(
             "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
             [

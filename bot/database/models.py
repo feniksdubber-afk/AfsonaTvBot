@@ -210,6 +210,21 @@ CREATE TABLE IF NOT EXISTS promo_codes (
 );
 
 -- ════════════════════════════════════════════
+--  PROMOKOD ISHLATILGANLIK
+--  Har bir foydalanuvchi har bir promokodni
+--  faqat 1 marta ishlatishi mumkin.
+-- ════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS promo_uses (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    promo_id INTEGER NOT NULL,
+    user_id  INTEGER NOT NULL,
+    used_at  TEXT    DEFAULT (datetime('now')),
+    UNIQUE(promo_id, user_id),
+    FOREIGN KEY (promo_id) REFERENCES promo_codes(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id)  REFERENCES users(tg_id)    ON DELETE CASCADE
+);
+
+-- ════════════════════════════════════════════
 --  VAZIFALAR
 -- ════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS tasks (

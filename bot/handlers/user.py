@@ -32,7 +32,7 @@ from bot.config import ADMINS
 from bot.database.db import get_db
 from bot.keyboards.user_kb import (
     main_menu, profile_kb, lang_kb,
-    notify_kb, back_kb
+    notify_kb, back_kb, cancel_kb, content_menu_kb
 )
 
 router = Router()
@@ -654,7 +654,8 @@ async def movie_request_start(message: Message, state: FSMContext):
             "📋 Какой фильм или сериал вы хотите добавить?\n"
             "Напишите название, год и язык:",
             lang
-        )
+        ),
+        reply_markup=cancel_kb(lang)
     )
     await state.set_state(RequestState.waiting_text)
 
@@ -701,7 +702,8 @@ async def support_start(message: Message, state: FSMContext):
             "📞 Muammoingizni yozing, adminlar tez orada javob beradi:",
             "📞 Опишите вашу проблему, администраторы ответят в ближайшее время:",
             lang
-        )
+        ),
+        reply_markup=cancel_kb(lang)
     )
     await state.set_state(SupportState.waiting_text)
 
@@ -793,8 +795,8 @@ async def noop(call: CallbackQuery):
 # ══════════════════════════════════════════════════════════════════════
 #  🎬 KINOLAR MENYUSI
 # ══════════════════════════════════════════════════════════════════════
-@router.message(F.text.in_(["🎬 Kinolar", "🎬 Фильмы"]))
-async def show_movies_menu(message: Message):
+@router.message(F.text.in_(["🎬 Kinolar", "🎬 Фильмы"]))  # eski nom uchun ham ishlaydi
+async def show_movies_menu_legacy(message: Message):
     user = await get_user(message.from_user.id)
     lang = user["lang"] if user else "uz"
 
@@ -1025,3 +1027,288 @@ async def support_reply_send(message: Message, state: FSMContext):
         await message.answer("✅ Javob yuborildi!")
     except Exception as e:
         await message.answer(f"❌ Yuborishda xato: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  ❌ BEKOR QILISH — Support va So'rov uchun
+# ══════════════════════════════════════════════════════════════════════
+@router.callback_query(F.data == "cancel_input")
+async def cancel_input(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    user = await get_user(call.from_user.id)
+    lang = user["lang"] if user else "uz"
+    await call.message.delete()
+    await call.answer(
+        txt("❌ Bekor qilindi", "❌ Отменено", lang)
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  🍿 TOMOSHA QILISH MENYUSI
+# ══════════════════════════════════════════════════════════════════════
+@router.message(F.text.in_(["🍿 Tomosha qilish", "🍿 Смотреть"]))
+async def show_watch_menu(message: Message):
+    user = await get_user(message.from_user.id)
+    lang = user["lang"] if user else "uz"
+    await message.answer(
+        txt(
+            "🍿 <b>Tomosha qilish</b>\n\nQaysi turni tanlaysiz?",
+            "🍿 <b>Смотреть</b>\n\nЧто выбираете?",
+            lang
+        ),
+        reply_markup=content_menu_kb(lang),
+        parse_mode="HTML"
+    )
+
+
+# ── Film ro'yxati ─────────────────────────────────────────────────────
+@router.callback_query(F.data.startswith("browse_movies_"))
+async def browse_movies(call: CallbackQuery):
+    user = await get_user(call.from_user.id)
+    lang = user["lang"] if user else "uz"
+    page = int(call.data.split("_")[2])
+    limit = 8
+    offset = page * limit
+
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM movies WHERE status = 'active'"
+        ) as cur:
+            total = (await cur.fetchone())[0]
+
+        async with db.execute(
+            """SELECT id, code, COALESCE(title_uz, title, 'Nomsiz') as title,
+                      year, genres, is_premium, views
+               FROM movies WHERE status = 'active'
+               ORDER BY views DESC LIMIT ? OFFSET ?""",
+            (limit, offset)
+        ) as cur:
+            rows = await cur.fetchall()
+
+    if not rows:
+        await call.answer(txt("Kinolar yo'q", "Фильмов нет", lang), show_alert=True)
+        return
+
+    lines = []
+    for mid, code, title, year, genres, is_prem, views in rows:
+        prem = "⭐" if is_prem else "🔓"
+        y = f"({year})" if year else ""
+        lines.append(f"{prem} <code>{code}</code> — <b>{title}</b> {y}")
+
+    # Sahifalash tugmalari
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"browse_movies_{page-1}"))
+    if offset + limit < total:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"browse_movies_{page+1}"))
+
+    buttons = []
+    if nav:
+        buttons.append(nav)
+    buttons.append([InlineKeyboardButton(
+        text=txt("◀️ Orqaga", "◀️ Назад", lang),
+        callback_data="back_watch_menu"
+    )])
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    text = (
+        txt(f"🎬 <b>Filmlar</b> ({total} ta)\n\n", f"🎬 <b>Фильмы</b> ({total})\n\n", lang)
+        + "\n".join(lines)
+        + txt(
+            "\n\n📌 Kino kodini yuboring — bot ko'rsatadi.",
+            "\n\n📌 Отправьте код фильма — бот покажет.",
+            lang
+        )
+    )
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+    await call.answer()
+
+
+# ── Serial ro'yxati ───────────────────────────────────────────────────
+@router.callback_query(F.data.startswith("browse_series_"))
+async def browse_series(call: CallbackQuery):
+    user = await get_user(call.from_user.id)
+    lang = user["lang"] if user else "uz"
+    page = int(call.data.split("_")[2])
+    limit = 8
+    offset = page * limit
+
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM series WHERE status = 'active'"
+        ) as cur:
+            total = (await cur.fetchone())[0]
+
+        async with db.execute(
+            """SELECT id, code, COALESCE(title_uz, 'Nomsiz serial') as title,
+                      year, genres, is_premium
+               FROM series WHERE status = 'active'
+               ORDER BY id DESC LIMIT ? OFFSET ?""",
+            (limit, offset)
+        ) as cur:
+            rows = await cur.fetchall()
+
+    if not rows:
+        await call.answer(txt("Seriallar yo'q", "Сериалов нет", lang), show_alert=True)
+        return
+
+    lines = []
+    for sid, code, title, year, genres, is_prem in rows:
+        prem = "⭐" if is_prem else "🔓"
+        y = f"({year})" if year else ""
+        lines.append(f"{prem} <code>{code}</code> — <b>{title}</b> {y}")
+
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"browse_series_{page-1}"))
+    if offset + limit < total:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"browse_series_{page+1}"))
+
+    buttons = []
+    if nav:
+        buttons.append(nav)
+    buttons.append([InlineKeyboardButton(
+        text=txt("◀️ Orqaga", "◀️ Назад", lang),
+        callback_data="back_watch_menu"
+    )])
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    text = (
+        txt(f"📺 <b>Seriallar</b> ({total} ta)\n\n", f"📺 <b>Сериалы</b> ({total})\n\n", lang)
+        + "\n".join(lines)
+        + txt(
+            "\n\n📌 Serial kodini yuboring — bot ko'rsatadi.",
+            "\n\n📌 Отправьте код сериала — бот покажет.",
+            lang
+        )
+    )
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+    await call.answer()
+
+
+# ── TOP kinolar ───────────────────────────────────────────────────────
+@router.callback_query(F.data == "browse_top")
+async def browse_top(call: CallbackQuery):
+    user = await get_user(call.from_user.id)
+    lang = user["lang"] if user else "uz"
+
+    async with get_db() as db:
+        async with db.execute(
+            """SELECT code, COALESCE(title_uz, title, 'Nomsiz') as title,
+                      year, views, is_premium
+               FROM movies WHERE status = 'active'
+               ORDER BY views DESC LIMIT 10"""
+        ) as cur:
+            rows = await cur.fetchall()
+
+    lines = []
+    for i, (code, title, year, views, is_prem) in enumerate(rows, 1):
+        prem = "⭐" if is_prem else "🔓"
+        y = f"({year})" if year else ""
+        lines.append(f"{i}. {prem} <code>{code}</code> — <b>{title}</b> {y} 👁{views:,}")
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text=txt("◀️ Orqaga", "◀️ Назад", lang),
+            callback_data="back_watch_menu"
+        )
+    ]])
+
+    text = (
+        txt("🔥 <b>TOP 10 — Eng ko'p ko'rilgan</b>\n\n",
+            "🔥 <b>ТОП 10 — Самые просматриваемые</b>\n\n", lang)
+        + "\n".join(lines)
+    )
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+    await call.answer()
+
+
+# ── Orqaga — tomosha menyusi ──────────────────────────────────────────
+@router.callback_query(F.data == "back_watch_menu")
+async def back_watch_menu(call: CallbackQuery):
+    user = await get_user(call.from_user.id)
+    lang = user["lang"] if user else "uz"
+    try:
+        await call.message.edit_text(
+            txt("🍿 <b>Tomosha qilish</b>\n\nQaysi turni tanlaysiz?",
+                "🍿 <b>Смотреть</b>\n\nЧто выбираете?", lang),
+            reply_markup=content_menu_kb(lang),
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+    await call.answer()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  ❤️ SEVIMLILARGA QO'SHISH / OLIB TASHLASH
+# ══════════════════════════════════════════════════════════════════════
+@router.callback_query(F.data.startswith("fav_toggle_"))
+async def fav_toggle_movie(call: CallbackQuery):
+    movie_id = int(call.data.split("_")[2])
+    user_id = call.from_user.id
+    user = await get_user(user_id)
+    lang = user["lang"] if user else "uz"
+
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT 1 FROM favorites WHERE user_id = ? AND movie_id = ?",
+            (user_id, movie_id)
+        ) as cur:
+            exists = await cur.fetchone()
+
+        if exists:
+            await db.execute(
+                "DELETE FROM favorites WHERE user_id = ? AND movie_id = ?",
+                (user_id, movie_id)
+            )
+            msg = txt("💔 Sevimlilardan olib tashlandi!", "💔 Удалено из избранного!", lang)
+        else:
+            await db.execute(
+                "INSERT OR IGNORE INTO favorites (user_id, movie_id) VALUES (?, ?)",
+                (user_id, movie_id)
+            )
+            msg = txt("❤️ Sevimlilarga qo'shildi!", "❤️ Добавлено в избранное!", lang)
+        await db.commit()
+
+    await call.answer(msg, show_alert=True)
+
+
+@router.callback_query(F.data.startswith("fav_series_"))
+async def fav_toggle_series(call: CallbackQuery):
+    series_id = int(call.data.split("_")[2])
+    user_id = call.from_user.id
+    user = await get_user(user_id)
+    lang = user["lang"] if user else "uz"
+
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT 1 FROM favorites WHERE user_id = ? AND series_id = ?",
+            (user_id, series_id)
+        ) as cur:
+            exists = await cur.fetchone()
+
+        if exists:
+            await db.execute(
+                "DELETE FROM favorites WHERE user_id = ? AND series_id = ?",
+                (user_id, series_id)
+            )
+            msg = txt("💔 Sevimlilardan olib tashlandi!", "💔 Удалено из избранного!", lang)
+        else:
+            await db.execute(
+                "INSERT OR IGNORE INTO favorites (user_id, series_id) VALUES (?, ?)",
+                (user_id, series_id)
+            )
+            msg = txt("❤️ Sevimlilarga qo'shildi!", "❤️ Добавлено в избранное!", lang)
+        await db.commit()
+
+    await call.answer(msg, show_alert=True)

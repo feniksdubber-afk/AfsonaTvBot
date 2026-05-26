@@ -68,15 +68,26 @@ async def inline_search(query: InlineQuery):
 
     async with get_db() as db:
         if not search:
-            # Bo'sh — eng mashhurlar
+            # Bo'sh — barcha film + seriallar (eng mashhur)
             async with db.execute("""
                 SELECT 'movie' as t, code,
                        COALESCE(title_uz, title, 'Nomsiz') as title,
                        year, genres, is_premium, rating, views
-                FROM movies WHERE status='active' AND is_premium=0
+                FROM movies WHERE status='active'
                 ORDER BY views DESC LIMIT ?
-            """, (MAX_RES,)) as cur:
-                rows = await cur.fetchall()
+            """, (MAX_RES - 2,)) as cur:
+                movie_rows = await cur.fetchall()
+
+            async with db.execute("""
+                SELECT 'series' as t, code,
+                       COALESCE(title_uz, 'Nomsiz serial') as title,
+                       year, genres, is_premium, 0 as rating, 0 as views
+                FROM series WHERE status='active'
+                ORDER BY id DESC LIMIT 2
+            """) as cur:
+                series_rows = await cur.fetchall()
+
+            rows = list(movie_rows) + list(series_rows)
         else:
             # Qidiruv — movies
             async with db.execute("""
@@ -105,13 +116,45 @@ async def inline_search(query: InlineQuery):
 
             rows = list(movie_rows) + list(series_rows)
 
+    bot_info = await query.bot.get_me()
+    bot_username = bot_info.username
+
+    results = []
+
+    # Birinchi qator — yo'riqnoma (faqat bo'sh so'rovda)
+    if not search:
+        hint_text = (
+            "🔍 Kino nomi yoki kodini kiriting"
+            if lang == "uz" else
+            "🔍 Введите название или код фильма"
+        )
+        results.append(
+            InlineQueryResultArticle(
+                id="hint",
+                title=hint_text,
+                description=(
+                    "Masalan: Avatar, 3291, Merlin..."
+                    if lang == "uz" else
+                    "Например: Avatar, 3291, Merlin..."
+                ),
+                input_message_content=InputTextMessageContent(
+                    message_text=(
+                        "🔍 Kino qidirish uchun: <b>@bot nom_yoki_kod</b>\n\nMasalan: Avatar, 3291"
+                        if lang == "uz" else
+                        "🔍 Для поиска: <b>@bot название_или_код</b>\n\nНапример: Avatar, 3291"
+                    ),
+                    parse_mode="HTML"
+                ),
+            )
+        )
+
     if not rows:
         empty_text = (
             f"🔍 '{search}' — hech narsa topilmadi"
             if lang == "uz" else
             f"🔍 '{search}' — ничего не найдено"
         )
-        results = [
+        results.append(
             InlineQueryResultArticle(
                 id="not_found",
                 title=empty_text,
@@ -122,13 +165,9 @@ async def inline_search(query: InlineQuery):
                     parse_mode="HTML"
                 ),
             )
-        ]
+        )
         await query.answer(results, cache_time=10, is_personal=True)
         return
-
-    bot_info = await query.bot.get_me()
-    bot_username = bot_info.username
-    results = []
 
     for row in rows:
         ctype, code, title, year, genres, is_prem, rating, views = row

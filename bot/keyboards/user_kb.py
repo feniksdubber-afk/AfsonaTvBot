@@ -1,3 +1,4 @@
+from urllib.parse import quote
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 # ==================== REPLIES (ASOSIY MENYULAR) ====================
@@ -200,20 +201,21 @@ def movie_view_kb(movie_id: int, code: str, is_fav: bool,
     watch_text = "▶️ Tomosha qilish" if lang == "uz" else "▶️ Смотреть"
     buttons = []
     if bot_username:
+        deep_link = f"https://t.me/{bot_username}?start=movie_{code}"
         buttons.append([InlineKeyboardButton(
             text=watch_text,
-            url=f"https://t.me/{bot_username}?start=movie_{code}"
+            url=deep_link
         )])
+        if code:
+            buttons.append([InlineKeyboardButton(
+                text=share_text,
+                url=f"https://t.me/share/url?url={quote(deep_link)}"
+            )])
     buttons.append([InlineKeyboardButton(text=fav_text, callback_data=f"fav_toggle_{movie_id}")])
-    if code:
-        buttons.append([InlineKeyboardButton(
-            text=share_text,
-            callback_data=f"share_movie_{code}"
-        )])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def series_view_kb(series_id: int, code: str, is_fav: bool,
-                   lang: str = "uz") -> InlineKeyboardMarkup:
+                   lang: str = "uz", bot_username: str = "") -> InlineKeyboardMarkup:
     """Serial ko'rsatilganda chiqadigan tugmalar."""
     fav_text = (
         ("❤️ Sevimlilardan olib tashlash" if is_fav else "🤍 Sevimlilarga qo'shish")
@@ -229,10 +231,11 @@ def series_view_kb(series_id: int, code: str, is_fav: bool,
         )],
         [InlineKeyboardButton(text=fav_text, callback_data=f"fav_series_{series_id}")],
     ]
-    if code:
+    if code and bot_username:
+        deep_link = f"https://t.me/{bot_username}?start=series_{code}"
         buttons.append([InlineKeyboardButton(
             text=share_text,
-            callback_data=f"share_series_{code}"
+            url=f"https://t.me/share/url?url={quote(deep_link)}"
         )])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 

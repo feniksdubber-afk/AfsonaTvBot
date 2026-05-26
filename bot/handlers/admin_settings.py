@@ -33,7 +33,14 @@ router = Router()
 class SettingsState(StatesGroup):
     waiting_card_number    = State()
     waiting_card_owner     = State()
-    waiting_tariff_edit    = State()
+    waiting_tariff_edit    = State()  # eski (saqlanadi, boshqa joylarda ishlatilishi mumkin)
+
+class TariffEditState(StatesGroup):
+    """Tarif tahrirlash — har bir maydon alohida qadam."""
+    choose_field   = State()   # qaysi maydonni o'zgartirish tanlandi
+    waiting_name   = State()   # yangi nom kutilmoqda
+    waiting_price  = State()   # yangi narx kutilmoqda
+    waiting_duration = State() # yangi muddat kutilmoqda
 
 
 def _settings_kb():
@@ -129,15 +136,30 @@ async def set_tariffs_list(call: CallbackQuery):
     ]
     buttons.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="close_settings")])
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
-    await call.message.edit_text("💰 <b>Tarif narxlari</b>\n\nTahrirlamoqchi bo'lgan tarifni tanlang:", reply_markup=kb, parse_mode="HTML")
+    await call.message.edit_text(
+        "💰 <b>Tarif narxlari</b>\n\nTahrirlamoqchi bo'lgan tarifni tanlang:",
+        reply_markup=kb, parse_mode="HTML"
+    )
     await call.answer()
 
 
+def _tariff_edit_kb(tariff_id: int) -> InlineKeyboardMarkup:
+    """Tarif tahrirlash: qaysi maydonni o'zgartirish kerakligini tanlash."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Nomni o'zgartirish",    callback_data=f"trf_name_{tariff_id}")],
+        [InlineKeyboardButton(text="💰 Narxni o'zgartirish",   callback_data=f"trf_price_{tariff_id}")],
+        [InlineKeyboardButton(text="📅 Muddatni o'zgartirish", callback_data=f"trf_dur_{tariff_id}")],
+        [InlineKeyboardButton(text="◀️ Tariflar ro'yxati",     callback_data="set_tariffs")],
+    ])
+
+
 @router.callback_query(F.data.startswith("edit_tariff_"), F.from_user.id.in_(ADMINS))
-async def edit_tariff_start(call: CallbackQuery, state: FSMContext):
+async def edit_tariff_start(call: CallbackQuery):
     tariff_id = int(call.data.split("_")[2])
     async with get_db() as db:
-        async with db.execute("SELECT id, name, duration, price FROM tariffs WHERE id = ?", (tariff_id,)) as cur:
+        async with db.execute(
+            "SELECT id, name, duration, price FROM tariffs WHERE id = ?", (tariff_id,)
+        ) as cur:
             row = await cur.fetchone()
 
     if not row:
@@ -145,92 +167,156 @@ async def edit_tariff_start(call: CallbackQuery, state: FSMContext):
         return
 
     tid, name, duration, price = row
-    await state.update_data(tariff_id=tid)
-    await state.set_state(SettingsState.waiting_tariff_edit)
-    await call.message.answer(
+    await call.message.edit_text(
         f"⭐ <b>{name}</b>\n"
-        f"📅 Hozirgi muddat: <b>{duration} kun</b>\n"
-        f"💰 Hozirgi narx: <b>{price:,} so'm</b>\n\n"
-        f"Yangi narx va muddatni <b>bitta xabarda</b> yuboring:\n\n"
-        f"📝 Format: <code>narx, X kun</code>\n"
-        f"Misol: <code>5,000, 3 kun</code>\n\n"
-        f"Faqat narx: <code>5,000</code>\n"
-        f"Faqat muddat: <code>3 kun</code>",
+        f"💰 Narx: <b>{price:,} so'm</b>\n"
+        f"📅 Muddat: <b>{duration} kun</b>\n\n"
+        f"Nimani o'zgartirmoqchisiz?",
+        reply_markup=_tariff_edit_kb(tid),
         parse_mode="HTML"
     )
     await call.answer()
 
 
-@router.message(SettingsState.waiting_tariff_edit, F.from_user.id.in_(ADMINS))
-async def edit_tariff_save(message: Message, state: FSMContext):
-    import re
-    text = (message.text or "").strip()
-    data = await state.get_data()
-    tariff_id = data.get("tariff_id")
+# ── Nomni o'zgartirish ──────────────────────────────────────────────
+@router.callback_query(F.data.startswith("trf_name_"), F.from_user.id.in_(ADMINS))
+async def tariff_name_start(call: CallbackQuery, state: FSMContext):
+    tariff_id = int(call.data.split("_")[2])
+    async with get_db() as db:
+        async with db.execute("SELECT name FROM tariffs WHERE id = ?", (tariff_id,)) as cur:
+            row = await cur.fetchone()
 
-    # Narxni ajratib olish: raqam (vergul va bo'sh joy bilan yozilishi mumkin)
-    # "kun" so'zi bo'lmagan raqam = narx
-    # "X kun" ko'rinishi = muddat
-    new_price = None
-    new_duration = None
+    old_name = row[0] if row else "?"
+    await state.update_data(tariff_id=tariff_id)
+    await state.set_state(TariffEditState.waiting_name)
+    await call.message.answer(
+        f"✏️ Hozirgi nom: <b>{old_name}</b>\n\n"
+        f"Yangi nomni yuboring:\n"
+        f"Misol: <code>Oylik</code>, <code>Yillik</code>, <code>3 Oylik</code>",
+        parse_mode="HTML"
+    )
+    await call.answer()
 
-    # "X kun" formatini qidirish
-    dur_match = re.search(r'(\d+)\s*kun', text, re.IGNORECASE)
-    if dur_match:
-        new_duration = int(dur_match.group(1))
 
-    # Narxni qidirish: vergul/bo'sh joy bo'lishi mumkin, "kun" bo'lmagan raqam
-    # "kun" so'zidan oldin kelgan raqamni olib tashlaymiz, qolgan raqamlar narx
-    text_no_dur = re.sub(r'\d+\s*kun', '', text, flags=re.IGNORECASE)
-    price_match = re.search(r'[\d,\s]+', text_no_dur)
-    if price_match:
-        price_str = price_match.group().replace(',', '').replace(' ', '').strip()
-        if price_str.isdigit() and int(price_str) > 0:
-            new_price = int(price_str)
-
-    if new_price is None and new_duration is None:
-        await message.answer(
-            "❌ Format noto'g'ri!\n\n"
-            "📝 To'g'ri formatlar:\n"
-            "<code>5,000, 3 kun</code> — narx va muddat\n"
-            "<code>5,000</code> — faqat narx\n"
-            "<code>3 kun</code> — faqat muddat",
-            parse_mode="HTML"
-        )
+@router.message(TariffEditState.waiting_name, F.from_user.id.in_(ADMINS))
+async def tariff_name_save(message: Message, state: FSMContext):
+    new_name = (message.text or "").strip()
+    if not new_name:
+        await message.answer("❌ Nom bo'sh bo'lishi mumkin emas!")
         return
 
+    data = await state.get_data()
+    tariff_id = data.get("tariff_id")
     await state.clear()
 
     async with get_db() as db:
-        async with db.execute("SELECT name, duration, price FROM tariffs WHERE id = ?", (tariff_id,)) as cur:
+        async with db.execute("SELECT name FROM tariffs WHERE id = ?", (tariff_id,)) as cur:
             row = await cur.fetchone()
-
-    if not row:
-        await message.answer("❌ Tarif topilmadi!")
-        return
-
-    old_name, old_duration, old_price = row
-    final_price    = new_price    if new_price    else old_price
-    final_duration = new_duration if new_duration else old_duration
-
-    async with get_db() as db:
-        await db.execute(
-            "UPDATE tariffs SET price = ?, duration = ? WHERE id = ?",
-            (final_price, final_duration, tariff_id)
-        )
+        old_name = row[0] if row else "?"
+        await db.execute("UPDATE tariffs SET name = ? WHERE id = ?", (new_name, tariff_id))
         await db.commit()
 
-    changes = []
-    if new_price:
-        changes.append(f"💰 Narx: <b>{old_price:,}</b> → <b>{final_price:,} so'm</b>")
-    if new_duration:
-        changes.append(f"📅 Muddat: <b>{old_duration}</b> → <b>{final_duration} kun</b>")
-
-    change_text = "\n".join(changes)
     await message.answer(
-        f"✅ <b>{old_name}</b> tarifi yangilandi:\n\n{change_text}",
+        f"✅ Tarif nomi yangilandi:\n"
+        f"<b>{old_name}</b> → <b>{new_name}</b>",
         parse_mode="HTML",
-        reply_markup=_settings_kb()
+        reply_markup=_tariff_edit_kb(tariff_id)
+    )
+
+
+# ── Narxni o'zgartirish ─────────────────────────────────────────────
+@router.callback_query(F.data.startswith("trf_price_"), F.from_user.id.in_(ADMINS))
+async def tariff_price_start(call: CallbackQuery, state: FSMContext):
+    tariff_id = int(call.data.split("_")[2])
+    async with get_db() as db:
+        async with db.execute("SELECT name, price FROM tariffs WHERE id = ?", (tariff_id,)) as cur:
+            row = await cur.fetchone()
+
+    name, price = (row[0], row[1]) if row else ("?", 0)
+    await state.update_data(tariff_id=tariff_id)
+    await state.set_state(TariffEditState.waiting_price)
+    await call.message.answer(
+        f"💰 <b>{name}</b>\n"
+        f"Hozirgi narx: <b>{price:,} so'm</b>\n\n"
+        f"Yangi narxni yuboring (faqat raqam):\n"
+        f"Misol: <code>49900</code> yoki <code>49 900</code>",
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+
+@router.message(TariffEditState.waiting_price, F.from_user.id.in_(ADMINS))
+async def tariff_price_save(message: Message, state: FSMContext):
+    raw = (message.text or "").replace(",", "").replace(" ", "").strip()
+    if not raw.isdigit() or int(raw) <= 0:
+        await message.answer("❌ Faqat musbat raqam yuboring!\nMisol: <code>49900</code>", parse_mode="HTML")
+        return
+
+    new_price = int(raw)
+    data = await state.get_data()
+    tariff_id = data.get("tariff_id")
+    await state.clear()
+
+    async with get_db() as db:
+        async with db.execute("SELECT name, price FROM tariffs WHERE id = ?", (tariff_id,)) as cur:
+            row = await cur.fetchone()
+        old_name, old_price = (row[0], row[1]) if row else ("?", 0)
+        await db.execute("UPDATE tariffs SET price = ? WHERE id = ?", (new_price, tariff_id))
+        await db.commit()
+
+    await message.answer(
+        f"✅ <b>{old_name}</b> narxi yangilandi:\n"
+        f"💰 <b>{old_price:,}</b> → <b>{new_price:,} so'm</b>",
+        parse_mode="HTML",
+        reply_markup=_tariff_edit_kb(tariff_id)
+    )
+
+
+# ── Muddatni o'zgartirish ───────────────────────────────────────────
+@router.callback_query(F.data.startswith("trf_dur_"), F.from_user.id.in_(ADMINS))
+async def tariff_dur_start(call: CallbackQuery, state: FSMContext):
+    tariff_id = int(call.data.split("_")[2])
+    async with get_db() as db:
+        async with db.execute("SELECT name, duration FROM tariffs WHERE id = ?", (tariff_id,)) as cur:
+            row = await cur.fetchone()
+
+    name, duration = (row[0], row[1]) if row else ("?", 0)
+    await state.update_data(tariff_id=tariff_id)
+    await state.set_state(TariffEditState.waiting_duration)
+    await call.message.answer(
+        f"📅 <b>{name}</b>\n"
+        f"Hozirgi muddat: <b>{duration} kun</b>\n\n"
+        f"Yangi muddatni <b>kun</b> hisobida yuboring:\n"
+        f"Misol: <code>30</code> (1 oy), <code>365</code> (1 yil), <code>7</code> (1 hafta)",
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+
+@router.message(TariffEditState.waiting_duration, F.from_user.id.in_(ADMINS))
+async def tariff_dur_save(message: Message, state: FSMContext):
+    raw = (message.text or "").replace(" ", "").strip()
+    if not raw.isdigit() or int(raw) <= 0:
+        await message.answer("❌ Faqat musbat raqam (kun) yuboring!\nMisol: <code>30</code>", parse_mode="HTML")
+        return
+
+    new_dur = int(raw)
+    data = await state.get_data()
+    tariff_id = data.get("tariff_id")
+    await state.clear()
+
+    async with get_db() as db:
+        async with db.execute("SELECT name, duration FROM tariffs WHERE id = ?", (tariff_id,)) as cur:
+            row = await cur.fetchone()
+        old_name, old_dur = (row[0], row[1]) if row else ("?", 0)
+        await db.execute("UPDATE tariffs SET duration = ? WHERE id = ?", (new_dur, tariff_id))
+        await db.commit()
+
+    await message.answer(
+        f"✅ <b>{old_name}</b> muddati yangilandi:\n"
+        f"📅 <b>{old_dur} kun</b> → <b>{new_dur} kun</b>",
+        parse_mode="HTML",
+        reply_markup=_tariff_edit_kb(tariff_id)
     )
 
 

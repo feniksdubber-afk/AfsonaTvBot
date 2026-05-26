@@ -1,12 +1,14 @@
 """
 SubscriptionMiddleware — to'liq himoyalangan versiya
 
-Tuzatilgan:
-  - InlineQuery ham tekshiriladi (oldin tekshirilmagan edi)
+TUZATILGAN:
+  - InlineQuery ham tekshiriladi
   - from_user None bo'lsa (kanal post) — xavfsiz o'tkazib yuboriladi
   - check_subscription va /start — har doim o'tkazib yuboriladi
+  - [FIX #3] Xato bo'lsa yutib yubormasdan logger.warning() yoziladi
 """
 
+import logging
 from typing import Any, Callable
 
 from aiogram import BaseMiddleware
@@ -14,6 +16,8 @@ from aiogram.types import (
     Message, CallbackQuery, InlineQuery,
     InlineKeyboardMarkup, InlineKeyboardButton,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class SubscriptionMiddleware(BaseMiddleware):
@@ -40,7 +44,6 @@ class SubscriptionMiddleware(BaseMiddleware):
                 return await handler(event, data)
 
         # InlineQuery — obuna tekshirishni o'tkazib yuboramiz
-        # (inline natijalarni bloklab bo'lmaydi, faqat xabar yuboriladi)
         if isinstance(event, InlineQuery):
             return await handler(event, data)
 
@@ -49,8 +52,12 @@ class SubscriptionMiddleware(BaseMiddleware):
             bot  = data["bot"]
             user = event.from_user
             not_subscribed = await check_user_subscriptions(bot, user.id)
-        except Exception:
-            # Xato bo'lsa — tekshirishsiz o'tkazib yuboramiz
+        except Exception as exc:
+            # [FIX #3] Xato log qilinadi — ko'rinmas xatolardan qutulish uchun
+            logger.warning(
+                "SubscriptionMiddleware: obuna tekshirishda xato (user_id=%s): %s",
+                event.from_user.id, exc
+            )
             return await handler(event, data)
 
         if not not_subscribed:
@@ -100,5 +107,5 @@ async def _send_subscribe_message(
         else:
             await event.answer()
             await event.message.answer(text, reply_markup=kb, parse_mode="HTML")
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("_send_subscribe_message xatosi: %s", exc)

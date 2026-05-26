@@ -6,9 +6,11 @@ AuthMiddleware
 3. data["lang"] ni o'rnatadi (SubscriptionMiddleware uchun kerak)
 
 TUZATILGAN:
-  - InlineQuery ham qo'llab-quvvatlanadi (main.py da middleware ulanishi kerak)
+  - InlineQuery ham qo'llab-quvvatlanadi
   - from_user None bo'lsa (bot xabari, kanal post): xavfsiz o'tkazib yuboriladi
   - DB xatosi bo'lsa: handler blokllamaydi, faqat log yoziladi
+  - [FIX #1] Yangi user bazaga qo'shilganda lang ham data["lang"] ga o'rnatiladi
+  - [FIX #2] Har loginда username va full_name yangilanadi (o'zgarsa bazada ham saqlanadi)
 """
 
 import logging
@@ -46,25 +48,36 @@ class AuthMiddleware(BaseMiddleware):
                     row = await cursor.fetchone()
 
                 if row is None:
+                    # ── Yangi foydalanuvchi ───────────────────────────
                     ref_code = secrets.token_hex(4).upper()
                     await db.execute(
                         """INSERT OR IGNORE INTO users
-                           (tg_id, username, full_name, referral_code)
-                           VALUES (?, ?, ?, ?)""",
-                        (user.id, user.username, user.full_name, ref_code),
+                           (tg_id, username, full_name, referral_code, lang)
+                           VALUES (?, ?, ?, ?, ?)""",
+                        (user.id, user.username, user.full_name, ref_code, lang),
                     )
                     await db.commit()
+                    # lang = "uz" allaqachon o'rnatilgan — data["lang"] to'g'ri bo'ladi
                 else:
                     is_banned: int = row[0]
                     lang = row[1] or "uz"
 
                     if is_banned:
-                        # InlineQuery uchun ban xabarini yuborib bo'lmaydi — o'tkazib yuboramiz
+                        # InlineQuery uchun ban xabarini yuborib bo'lmaydi
                         if isinstance(event, Message):
                             await event.answer("🚫 Siz bloklangansiz.")
                         elif isinstance(event, CallbackQuery):
                             await event.answer("🚫 Siz bloklangansiz.", show_alert=True)
                         return
+
+                    # [FIX #2] Username/ism o'zgargan bo'lsa bazani yangilaymiz
+                    await db.execute(
+                        """UPDATE users
+                           SET username = ?, full_name = ?
+                           WHERE tg_id = ?""",
+                        (user.username, user.full_name, user.id),
+                    )
+                    await db.commit()
 
         except Exception as exc:
             logger.error("AuthMiddleware DB xatosi (user_id=%s): %s", user.id, exc)

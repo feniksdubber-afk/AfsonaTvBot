@@ -591,7 +591,7 @@ async def omdb_add_save(call: CallbackQuery, state: FSMContext, bot: Bot):
         f"🔑 Kod: <code>{code}</code>\n"
         f"🎬 Nomi: {title_uz}\n"
         f"📅 Yil: {year} | 🌍 {country}\n"
-        f"⭐ Premium: {'Ha' if is_premium else \"Yo'q\"}",
+        f"⭐ Premium: {'Ha' if is_premium else 'Yoq'}",
         parse_mode="HTML",
     )
     await call.answer()

@@ -33,7 +33,8 @@ from bot.database.db import get_db
 from bot.utils.helpers import get_user, txt, is_admin
 from bot.keyboards.user_kb import (
     main_menu, profile_kb, lang_kb,
-    notify_kb, back_kb, cancel_kb, content_menu_kb
+    notify_kb, back_kb, cancel_kb, content_menu_kb,
+    movie_view_kb, series_view_kb
 )
 
 router = Router()
@@ -223,6 +224,14 @@ async def _send_movie_by_code(message: Message, code: str, lang: str = "uz"):
         )
         await db.commit()
 
+    # Sevimlida borligini tekshirish
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT id FROM favorites WHERE user_id = ? AND movie_id = ?",
+            (message.from_user.id, m["id"])
+        ) as cur:
+            is_fav = (await cur.fetchone()) is not None
+
     # Franshiza qismlarini tekshirish (#3)
     from bot.handlers.franchise import get_movie_parts, franchise_parts_kb
     parts = await get_movie_parts(m["id"])
@@ -236,11 +245,13 @@ async def _send_movie_by_code(message: Message, code: str, lang: str = "uz"):
             reply_markup=fparts_kb
         )
     else:
+        kb = movie_view_kb(m["id"], m.get("code", ""), is_fav, lang)
         await message.answer_video(
             video=m["file_id"],
             caption=caption,
             parse_mode="HTML",
-            protect_content=True
+            protect_content=True,
+            reply_markup=kb
         )
 
 
@@ -320,6 +331,25 @@ async def _send_series_by_code(message: Message, code: str, lang: str = "uz"):
         f"🍿 {desc}\n\n"
         f"👇 {'Faslni tanlang:' if lang == 'uz' else 'Выберите сезон:'}"
     )
+
+    # Sevimlida borligini tekshirish
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT id FROM favorites WHERE user_id = ? AND series_id = ?",
+            (message.from_user.id, s["id"])
+        ) as cur:
+            is_fav = (await cur.fetchone()) is not None
+
+    # Fasllar KB ga sevimli tugmasini qo'shamiz
+    fav_text = (
+        ("❤️ Sevimlilardan olib tashlash" if is_fav else "🤍 Sevimlilarga qo'shish")
+        if lang == "uz" else
+        ("❤️ Убрать из избранного" if is_fav else "🤍 Добавить в избранное")
+    )
+    from aiogram.types import InlineKeyboardButton
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(text=fav_text, callback_data=f"fav_series_{s['id']}")
+    ])
 
     # FIX #9: poster_file_id None bo'lsa answer_photo xato bermasligi
     if s.get("poster_file_id"):

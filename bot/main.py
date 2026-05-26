@@ -9,7 +9,7 @@ Router ulash tartibi (muhim!):
   3. admin_channels       — admin kanal boshqaruvi
   4. user                 — foydalanuvchi handlerlari (/start, profil...)
   5. movie                — kino fasl/qism callbacklari
-  6. admin                — admin panel (FSM bilan kino/serial qo'shish)
+  6. admin                — admin panel (ichida 5 ta sub-router)
   7. premium              — premium va to'lov handlerlari
   8. gamification         — ball tizimi, vazifalar, turnir
 
@@ -20,6 +20,7 @@ Middleware tartibi:
 O'ZGARISH:
   - MemoryStorage → aiogram_sqlite_storage.SQLiteStorage
     Bot to'xtab qayta ishga tushsa FSM holatlari saqlanib qoladi.
+  - [FIX] admin.py kichik modullarga bo'lindi — main.py da faqat admin.router import qilinadi
 """
 
 import asyncio
@@ -41,9 +42,9 @@ from bot.handlers import (
 from bot.handlers import subscription as subscription_handler
 from bot.handlers import inline_search
 from bot.handlers import admin_channels
-from bot.handlers import omdb          # #7 OMDb qidiruvi
-from bot.handlers import franchise     # #3 Franshiza va serialga qism
-from bot.handlers import admin_edit    # #6 To'liq tahrirlash
+from bot.handlers import omdb
+from bot.handlers import franchise
+from bot.handlers import admin_edit
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.subscription import SubscriptionMiddleware
 from bot.utils.scheduler import setup_scheduler
@@ -63,7 +64,6 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# FSM holatlari saqlanadigan fayl (kino DB dan alohida — aralashmasin)
 FSM_DB_PATH = DB_PATH.replace("kinobot.db", "fsm.db")
 
 
@@ -89,12 +89,12 @@ async def main() -> None:
     dp.include_router(admin_channels.router)         # 3
     dp.include_router(user.router)                   # 4
     dp.include_router(movie.router)                  # 5
-    dp.include_router(admin.router)                  # 6
+    dp.include_router(admin.router)                  # 6 — ichida 5 ta sub-router
     dp.include_router(premium.router)                # 7
     dp.include_router(gamification.router)           # 8
-    dp.include_router(omdb.router)                   # 9  OMDb qidiruvi
-    dp.include_router(franchise.router)              # 10 Franshiza / serialga qism
-    dp.include_router(admin_edit.router)             # 11 To'liq tahrirlash
+    dp.include_router(omdb.router)                   # 9
+    dp.include_router(franchise.router)              # 10
+    dp.include_router(admin_edit.router)             # 11
 
     # ── Scheduler ────────────────────────────────────────────────────
     scheduler = setup_scheduler(bot)

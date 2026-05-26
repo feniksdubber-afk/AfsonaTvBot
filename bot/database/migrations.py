@@ -58,6 +58,7 @@ async def run_migrations() -> None:
         await _add_column(db, "users", "night_mode", "INTEGER DEFAULT 0")
         await _add_column(db, "users", "notify",     "INTEGER DEFAULT 1")
         await _add_column(db, "users", "balance",    "INTEGER DEFAULT 0")
+        await _add_column(db, "users", "phone",      "TEXT")
 
         # ── 2. movies jadvaliga ustunlar ──────────────────────────────
         await _add_column(db, "movies", "title_uz",       "TEXT")

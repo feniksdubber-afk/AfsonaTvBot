@@ -237,12 +237,25 @@ async def _send_movie_by_code(message: Message, code: str, lang: str = "uz"):
         )
         await db.commit()
 
-    await message.answer_video(
-        video=m["file_id"],
-        caption=caption,
-        parse_mode="HTML",
-        protect_content=True
-    )
+    # Franshiza qismlarini tekshirish (#3)
+    from bot.handlers.franchise import get_movie_parts, franchise_parts_kb
+    parts = await get_movie_parts(m["id"])
+    if parts:
+        fparts_kb = franchise_parts_kb(m["id"], parts, lang)
+        await message.answer_video(
+            video=m["file_id"],
+            caption=caption + f"\n\n🎞 Bu filmning <b>{len(parts)}</b> ta qismi mavjud:",
+            parse_mode="HTML",
+            protect_content=True,
+            reply_markup=fparts_kb
+        )
+    else:
+        await message.answer_video(
+            video=m["file_id"],
+            caption=caption,
+            parse_mode="HTML",
+            protect_content=True
+        )
 
 
 async def _send_series_by_code(message: Message, code: str, lang: str = "uz"):

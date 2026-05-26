@@ -527,3 +527,151 @@ async def cancel_premium(call: CallbackQuery):
     )
     await call.answer()
 
+
+
+# ════════════════════════════════════════════════════════
+#  💰 BALLGA PREMIUM SOTIB OLISH  (#8)
+# ════════════════════════════════════════════════════════
+#
+# Tarif jadvalida points_price ustuni bor (migration qo'shdi).
+# Admin sozlamalardan har tarif uchun ball narxini belgilaydi.
+# points_price = 0 bo'lsa — ballar bilan sotib bo'lmaydi.
+#
+# Flow:
+#   show_premium → "💰 Balldan sotib olish" tugmasi
+#   → buy_with_points_list → tarif tanlash
+#   → buy_with_points_{tariff_id} → balans tekshiruvi → faollashtirish
+
+@router.callback_query(F.data == "buy_with_points_list")
+async def buy_with_points_list(call: CallbackQuery):
+    """Ball bilan sotib olish uchun tarif ro'yxati."""
+    user = await get_user(call.from_user.id)
+    lang = user["lang"] if user else "uz"
+    balance = user["balance"] if user else 0
+
+    tariffs = await get_tariffs()
+    # Faqat points_price > 0 bo'lganlarni ko'rsatamiz
+    point_tariffs = [t for t in tariffs if t.get("points_price", 0) > 0]
+
+    if not point_tariffs:
+        await call.answer(
+            txt(
+                "❌ Hozircha ballga sotib bo'lmaydi.",
+                "❌ Пока недоступно.",
+                lang
+            ),
+            show_alert=True
+        )
+        return
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    buttons = []
+    for t in point_tariffs:
+        pts = t["points_price"]
+        has_enough = balance >= pts
+        emoji = "✅" if has_enough else "❌"
+        label = (
+            f"{emoji} {t['name']} — {pts:,} ball ({t['duration']} kun)"
+            if lang == "uz" else
+            f"{emoji} {t['name']} — {pts:,} баллов ({t['duration']} дн.)"
+        )
+        buttons.append([InlineKeyboardButton(
+            text=label,
+            callback_data=f"buy_with_points_{t['id']}"
+        )])
+
+    back = "◀️ Orqaga" if lang == "uz" else "◀️ Назад"
+    buttons.append([InlineKeyboardButton(text=back, callback_data="show_premium")])
+
+    balance_text = (
+        f"💰 Sizning balansingiz: <b>{balance:,} ball</b>"
+        if lang == "uz" else
+        f"💰 Ваш баланс: <b>{balance:,} баллов</b>"
+    )
+
+    await call.message.edit_text(
+        balance_text + "\n\n" + (
+            "Tarif tanlang:"
+            if lang == "uz" else
+            "Выберите тариф:"
+        ),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("buy_with_points_"))
+async def buy_with_points_confirm(call: CallbackQuery):
+    """Balldan to'lov — tasdiqlash va faollashtirish."""
+    tariff_id = int(call.data.split("_")[3])
+    user = await get_user(call.from_user.id)
+    lang = user["lang"] if user else "uz"
+    balance = user["balance"] if user else 0
+
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT id, name, duration, points_price FROM tariffs WHERE id = ?",
+            (tariff_id,)
+        ) as cur:
+            row = await cur.fetchone()
+
+    if not row:
+        await call.answer(txt("❌ Tarif topilmadi!", "❌ Тариф не найден!", lang), show_alert=True)
+        return
+
+    tid, name, duration, points_price = row
+
+    if points_price <= 0:
+        await call.answer(
+            txt("❌ Bu tarif ballar bilan sotib bo'lmaydi!", "❌ Этот тариф нельзя купить баллами!", lang),
+            show_alert=True
+        )
+        return
+
+    if balance < points_price:
+        shortage = points_price - balance
+        await call.answer(
+            txt(
+                f"❌ Balansingiz yetarli emas! {shortage:,} ball kam.",
+                f"❌ Недостаточно баллов! Не хватает {shortage:,}.",
+                lang
+            ),
+            show_alert=True
+        )
+        return
+
+    # Balansdan ayirish va premiumni faollashtirish
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE users SET balance = balance - ? WHERE tg_id = ?",
+            (points_price, call.from_user.id)
+        )
+        await db.execute(
+            "INSERT INTO point_log (user_id, amount, reason) VALUES (?, ?, 'premium_purchase')",
+            (call.from_user.id, -points_price)
+        )
+        await db.execute(
+            """INSERT INTO payments (user_id, tariff_id, amount, method, status, paid_at)
+               VALUES (?, ?, ?, 'points', 'paid', datetime('now'))""",
+            (call.from_user.id, tariff_id, points_price)
+        )
+        await db.commit()
+
+    new_until = await activate_premium(call.from_user.id, duration)
+
+    await call.message.edit_text(
+        txt(
+            f"🎉 <b>Premium faollashtirildi!</b>\n\n"
+            f"⭐ Tarif: {name}\n"
+            f"📅 Muddat: {new_until}\n"
+            f"💰 Sarflangan: {points_price:,} ball",
+            f"🎉 <b>Premium активирован!</b>\n\n"
+            f"⭐ Тариф: {name}\n"
+            f"📅 До: {new_until}\n"
+            f"💰 Потрачено: {points_price:,} баллов",
+            lang
+        ),
+        parse_mode="HTML"
+    )
+    await call.answer()

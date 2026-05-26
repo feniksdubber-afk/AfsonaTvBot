@@ -473,6 +473,7 @@ async def process_find_content_to_edit(message: Message, state: FSMContext):
     archive_cb  = f"status_archive_{c_type}_{c_id}"
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ To'liq tahrirlash", callback_data=f"full_edit_{c_type}_{c_id}")],
         [
             InlineKeyboardButton(text=archive_txt, callback_data=archive_cb),
             InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"status_delete_{c_type}_{c_id}")
@@ -588,7 +589,16 @@ async def admin_movie_view(message: Message):
         f"🔒 Premium: {'Ha' if m.get('is_premium') else 'Yoq'}\n"
         f"🚦 Status: {m.get('status', 'active')}\n"
     )
-    await message.answer(text, reply_markup=movie_manage_kb(m_id), parse_mode="HTML")
+    # ✏️ To'liq tahrirlash tugmasi qo'shildi (#6)
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb_admin_movie = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ To'liq tahrirlash", callback_data=f"full_edit_movie_{m_id}")],
+        [
+            InlineKeyboardButton(text="📥 Arxiv",    callback_data=f"status_archive_movie_{m_id}"),
+            InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"status_delete_movie_{m_id}"),
+        ],
+    ])
+    await message.answer(text, reply_markup=kb_admin_movie, parse_mode="HTML")
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -943,6 +953,8 @@ def _settings_kb():
         [InlineKeyboardButton(text="💳 Karta raqami",  callback_data="set_card_number")],
         [InlineKeyboardButton(text="👤 Karta egasi",   callback_data="set_card_owner")],
         [InlineKeyboardButton(text="💰 Tarif narxlari", callback_data="set_tariffs")],
+        [InlineKeyboardButton(text="🔎 OMDb API kalit", callback_data="set_omdb_key")],
+        [InlineKeyboardButton(text="💎 Ball narxlari",  callback_data="set_points_tariffs")],
         [InlineKeyboardButton(text="❌ Yopish",        callback_data="close_settings")],
     ])
 
@@ -1151,4 +1163,134 @@ async def admin_back_to_main(message: Message):
     await message.answer(
         "🏠 Bosh menyuga qaytildi.",
         reply_markup=main_menu(lang)
+    )
+
+
+# ── OMDb API Key sozlash ───────────────────────────────────────────────
+class OmdbKeyState(StatesGroup):
+    waiting = State()
+
+class PointsTariffState(StatesGroup):
+    waiting = State()
+    tariff_id = State()
+
+
+@router.callback_query(F.data == "set_omdb_key", F.from_user.id.in_(ADMINS))
+async def set_omdb_key_start(call: CallbackQuery, state: FSMContext):
+    async with get_db() as db:
+        async with db.execute("SELECT value FROM settings WHERE key = 'omdb_api_key'") as cur:
+            row = await cur.fetchone()
+    current = row[0] if row else "(kiritilmagan)"
+    await call.message.answer(
+        f"🔎 <b>OMDb API Key</b>\n\n"
+        f"Hozirgi: <code>{current}</code>\n\n"
+        f"Yangi API kalitni yuboring:\n"
+        f"👉 Bepul kalit olish: https://www.omdbapi.com/apikey.aspx\n"
+        f"(1000 so'rov/kun)",
+        parse_mode="HTML"
+    )
+    await state.set_state(OmdbKeyState.waiting)
+    await call.answer()
+
+
+@router.message(OmdbKeyState.waiting, F.from_user.id.in_(ADMINS))
+async def set_omdb_key_save(message: Message, state: FSMContext):
+    await state.clear()
+    key = (message.text or "").strip()
+    if not key or len(key) < 8:
+        await message.answer("❌ Kalit noto'g'ri ko'rinadi!")
+        return
+    async with get_db() as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('omdb_api_key', ?)", (key,)
+        )
+        await db.commit()
+    await message.answer(
+        f"✅ OMDb API kalit saqlandi: <code>{key}</code>\n\n"
+        f"Foydalanuvchilar /imdb buyrug'ini ishlatishi mumkin!",
+        parse_mode="HTML",
+        reply_markup=_settings_kb()
+    )
+
+
+# ── Ball narxlari (tariffs.points_price) sozlash ─────────────────────
+@router.callback_query(F.data == "set_points_tariffs", F.from_user.id.in_(ADMINS))
+async def set_points_tariffs_list(call: CallbackQuery):
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT id, name, duration, price, points_price FROM tariffs ORDER BY price"
+        ) as cur:
+            rows = await cur.fetchall()
+
+    if not rows:
+        await call.answer("Tarifflar yo'q!", show_alert=True)
+        return
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    buttons = [
+        [InlineKeyboardButton(
+            text=f"⭐ {name} — {pts or 0:,} ball",
+            callback_data=f"edit_pts_tariff_{tid}"
+        )]
+        for tid, name, duration, price, pts in rows
+    ]
+    buttons.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="close_settings")])
+    await call.message.edit_text(
+        "💎 <b>Ball narxlari</b>\n\n"
+        "Tarif tanlang va ball narxini belgilang.\n"
+        "0 = ballar bilan sotib bo'lmaydi.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("edit_pts_tariff_"), F.from_user.id.in_(ADMINS))
+async def edit_pts_tariff_start(call: CallbackQuery, state: FSMContext):
+    tariff_id = int(call.data.split("_")[3])
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT name, duration, points_price FROM tariffs WHERE id = ?", (tariff_id,)
+        ) as cur:
+            row = await cur.fetchone()
+
+    if not row:
+        await call.answer("❌ Topilmadi!", show_alert=True)
+        return
+
+    name, duration, pts = row
+    await state.update_data(tariff_id=tariff_id)
+    await state.set_state(PointsTariffState.waiting)
+    await call.message.answer(
+        f"⭐ <b>{name}</b> ({duration} kun)\n"
+        f"Hozirgi ball narxi: <b>{pts or 0:,} ball</b>\n\n"
+        f"Yangi ball narxini yuboring (0 = o'chirilgan):",
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+
+@router.message(PointsTariffState.waiting, F.from_user.id.in_(ADMINS))
+async def edit_pts_tariff_save(message: Message, state: FSMContext):
+    data = await state.get_data()
+    tariff_id = data.get("tariff_id")
+    await state.clear()
+
+    text = (message.text or "").strip().replace(",", "").replace(" ", "")
+    if not text.isdigit():
+        await message.answer("❌ Faqat raqam yuboring!")
+        return
+
+    pts = int(text)
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE tariffs SET points_price = ? WHERE id = ?", (pts, tariff_id)
+        )
+        await db.commit()
+
+    label = f"{pts:,} ball" if pts > 0 else "0 (o'chirilgan)"
+    await message.answer(
+        f"✅ Ball narxi yangilandi: <b>{label}</b>",
+        parse_mode="HTML",
+        reply_markup=_settings_kb()
     )

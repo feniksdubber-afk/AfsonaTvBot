@@ -1302,12 +1302,24 @@ async def back_watch_menu(call: CallbackQuery):
 # ══════════════════════════════════════════════════════════════════════
 @router.callback_query(F.data.startswith("fav_toggle_"))
 async def fav_toggle_movie(call: CallbackQuery):
-    movie_id = int(call.data.split("_")[2])
+    # "fav_toggle_123" → split("_", 2) → ["fav", "toggle", "123"]
+    movie_id = int(call.data.split("_", 2)[2])
     user_id = call.from_user.id
     user = await get_user(user_id)
     lang = user["lang"] if user else "uz"
 
     async with get_db() as db:
+        # Avval barcha duplicate qatorlarni tozalaymiz (eski xato yozuvlar)
+        await db.execute(
+            """DELETE FROM favorites
+               WHERE id NOT IN (
+                   SELECT MIN(id) FROM favorites
+                   WHERE user_id = ? AND movie_id = ?
+               )
+               AND user_id = ? AND movie_id = ?""",
+            (user_id, movie_id, user_id, movie_id)
+        )
+
         async with db.execute(
             "SELECT 1 FROM favorites WHERE user_id = ? AND movie_id = ?",
             (user_id, movie_id)
@@ -1322,7 +1334,7 @@ async def fav_toggle_movie(call: CallbackQuery):
             msg = txt("💔 Sevimlilardan olib tashlandi!", "💔 Удалено из избранного!", lang)
         else:
             await db.execute(
-                "INSERT OR IGNORE INTO favorites (user_id, movie_id) VALUES (?, ?)",
+                "INSERT INTO favorites (user_id, movie_id) VALUES (?, ?)",
                 (user_id, movie_id)
             )
             msg = txt("❤️ Sevimlilarga qo'shildi!", "❤️ Добавлено в избранное!", lang)
@@ -1333,12 +1345,24 @@ async def fav_toggle_movie(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("fav_series_"))
 async def fav_toggle_series(call: CallbackQuery):
-    series_id = int(call.data.split("_")[2])
+    # "fav_series_123" → split("_", 2) → ["fav", "series", "123"]
+    series_id = int(call.data.split("_", 2)[2])
     user_id = call.from_user.id
     user = await get_user(user_id)
     lang = user["lang"] if user else "uz"
 
     async with get_db() as db:
+        # Avval barcha duplicate qatorlarni tozalaymiz (eski xato yozuvlar)
+        await db.execute(
+            """DELETE FROM favorites
+               WHERE id NOT IN (
+                   SELECT MIN(id) FROM favorites
+                   WHERE user_id = ? AND series_id = ?
+               )
+               AND user_id = ? AND series_id = ?""",
+            (user_id, series_id, user_id, series_id)
+        )
+
         async with db.execute(
             "SELECT 1 FROM favorites WHERE user_id = ? AND series_id = ?",
             (user_id, series_id)
@@ -1353,7 +1377,7 @@ async def fav_toggle_series(call: CallbackQuery):
             msg = txt("💔 Sevimlilardan olib tashlandi!", "💔 Удалено из избранного!", lang)
         else:
             await db.execute(
-                "INSERT OR IGNORE INTO favorites (user_id, series_id) VALUES (?, ?)",
+                "INSERT INTO favorites (user_id, series_id) VALUES (?, ?)",
                 (user_id, series_id)
             )
             msg = txt("❤️ Sevimlilarga qo'shildi!", "❤️ Добавлено в избранное!", lang)

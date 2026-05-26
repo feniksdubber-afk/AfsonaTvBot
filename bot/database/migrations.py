@@ -175,6 +175,7 @@ async def run_migrations() -> None:
                 ("card_number",  "0000 0000 0000 0000"),
                 ("card_owner",   "Bot Admin"),
                 ("omdb_api_key", ""),          # OMDb API key
+                ("protect_content", "1"),      # Nusxa olish himoyasi (default: yoqiq)
             ]
         )
 

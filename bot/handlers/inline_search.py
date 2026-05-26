@@ -210,9 +210,15 @@ async def inline_search(query: InlineQuery):
                 f"Нажмите кнопку ниже, чтобы получить фильм:"
             )
 
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text=btn_text, url=url)
-        ]])
+        from urllib.parse import quote as url_quote
+        share_text = "📤 Ulashish" if lang == "uz" else "📤 Поделиться"
+        kb_rows = [[InlineKeyboardButton(text=btn_text, url=url)]]
+        if not locked:
+            kb_rows.append([InlineKeyboardButton(
+                text=share_text,
+                url=f"https://t.me/share/url?url={url_quote(url)}"
+            )])
+        kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
 
         results.append(
             InlineQueryResultArticle(

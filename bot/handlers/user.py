@@ -24,7 +24,7 @@ from aiogram.types import (
     Message, CallbackQuery,
     InlineKeyboardMarkup, InlineKeyboardButton
 )
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -83,6 +83,58 @@ async def _profile_stats(tg_id: int) -> tuple[int, int]:
 # ══════════════════════════════════════════════════════════════════════
 #  /start — DEEP LINK HANDLERI
 # ══════════════════════════════════════════════════════════════════════
+@router.message(F.text == "/help")
+@router.message(F.text == "ℹ️ Yordam")
+async def cmd_help(message: Message):
+    user = await get_user(message.from_user.id)
+    lang = user["lang"] if user else "uz"
+    if lang == "uz":
+        text = (
+            "ℹ️ <b>Bot bo'yicha yordam</b>\n\n"
+            "🎬 <b>Kino ko'rish:</b>\n"
+            "• Kino kodini yuboring (masalan: <code>401</code>)\n"
+            "• Yoki 🍿 Tomosha qilish → Filmlar / Seriallar\n\n"
+            "🔍 <b>Qidirish:</b>\n"
+            "• /search yoki 🔍 Qidirish tugmasini bosing\n"
+            "• Kino nomini yozing\n\n"
+            "❤️ <b>Sevimlilar:</b>\n"
+            "• Kino ostidagi ❤️ tugmani bosing\n"
+            "• Ko'rish: 👤 Profil → ❤️ Sevimlilar\n\n"
+            "📜 <b>Ko'rish tarixi:</b>\n"
+            "• 👤 Profil → 📜 Tarix\n\n"
+            "⭐ <b>Premium:</b>\n"
+            "• /premium yoki ⭐ Premium tugmasini bosing\n\n"
+            "📋 <b>Kino so'rovi:</b>\n"
+            "• 📋 So'rov tugmasi orqali talab qiling\n\n"
+            "📤 <b>Ulashish:</b>\n"
+            "• Kino ostidagi 📤 Ulashish tugmasini bosing\n\n"
+            "📞 <b>Muammo bo'lsa:</b> 📞 Support"
+        )
+    else:
+        text = (
+            "ℹ️ <b>Помощь по боту</b>\n\n"
+            "🎬 <b>Смотреть фильм:</b>\n"
+            "• Отправьте код фильма (например: <code>401</code>)\n"
+            "• Или 🍿 Смотреть → Фильмы / Сериалы\n\n"
+            "🔍 <b>Поиск:</b>\n"
+            "• /search или кнопка 🔍 Поиск\n"
+            "• Введите название фильма\n\n"
+            "❤️ <b>Избранное:</b>\n"
+            "• Нажмите ❤️ под фильмом\n"
+            "• Просмотр: 👤 Профиль → ❤️ Избранное\n\n"
+            "📜 <b>История просмотров:</b>\n"
+            "• 👤 Профиль → 📜 История\n\n"
+            "⭐ <b>Premium:</b>\n"
+            "• /premium или кнопка ⭐ Премиум\n\n"
+            "📋 <b>Запрос фильма:</b>\n"
+            "• Через кнопку 📋 Запрос\n\n"
+            "📤 <b>Поделиться:</b>\n"
+            "• Нажмите 📤 под фильмом\n\n"
+            "📞 <b>Проблемы:</b> 📞 Поддержка"
+        )
+    await message.answer(text, parse_mode="HTML")
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
     # FIX #3: /start kelganda FSM holati tozalanadi
@@ -237,6 +289,7 @@ async def _send_movie_by_code(message: Message, code: str, lang: str = "uz", use
     from bot.handlers.franchise import get_movie_parts, franchise_parts_kb
     parts = await get_movie_parts(m["id"])
     protect = await get_protect_setting()
+    bot_info = await message.bot.get_me()
     if parts:
         fparts_kb = franchise_parts_kb(m["id"], parts, lang)
         await message.answer_video(
@@ -247,7 +300,7 @@ async def _send_movie_by_code(message: Message, code: str, lang: str = "uz", use
             reply_markup=fparts_kb
         )
     else:
-        kb = movie_view_kb(m["id"], m.get("code", ""), is_fav, lang)
+        kb = movie_view_kb(m["id"], m.get("code", ""), is_fav, lang, bot_username=bot_info.username)
         await message.answer_video(
             video=m["file_id"],
             caption=caption,
@@ -346,6 +399,24 @@ async def _send_series_by_code(message: Message, code: str, lang: str = "uz", us
     except Exception:
         is_fav = False
 
+    # Ko'rish davomini tekshirish
+    last_ep = None
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                """SELECT h.season_number, h.episode_number, e.id
+                   FROM watch_history h
+                   JOIN episodes e ON e.series_id = h.series_id
+                     AND e.season_number = h.season_number
+                     AND e.episode_number = h.episode_number
+                   WHERE h.user_id = ? AND h.series_id = ?
+                   ORDER BY h.watched_at DESC LIMIT 1""",
+                (user_id or message.from_user.id, s["id"])
+            ) as cur:
+                last_ep = await cur.fetchone()
+    except Exception:
+        pass
+
     # Fasllar KB ga sevimli va ulashish tugmalarini qo'shamiz
     fav_text = (
         ("❤️ Sevimlilardan olib tashlash" if is_fav else "🤍 Sevimlilarga qo'shish")
@@ -353,10 +424,28 @@ async def _send_series_by_code(message: Message, code: str, lang: str = "uz", us
         ("❤️ Убрать из избранного" if is_fav else "🤍 Добавить в избранное")
     )
     share_text = "📤 Serialni ulashish" if lang == "uz" else "📤 Поделиться сериалом"
-    kb_list = list(kb.inline_keyboard) + [
+    bot_info = await message.bot.get_me()
+    from urllib.parse import quote as url_quote
+    deep_link = f"https://t.me/{bot_info.username}?start=series_{s['code']}"
+
+    extra_buttons = []
+    if last_ep:
+        s_n, e_n, ep_id = last_ep
+        cont_text = (
+            f"▶️ Davom ettirish ({s_n}-fasl {e_n}-qism)"
+            if lang == "uz" else
+            f"▶️ Продолжить ({s_n} сезон {e_n} серия)"
+        )
+        extra_buttons.append([InlineKeyboardButton(text=cont_text, callback_data=f"play_ep_{ep_id}")])
+
+    extra_buttons += [
         [InlineKeyboardButton(text=fav_text, callback_data=f"fav_series_{s['id']}")],
-        [InlineKeyboardButton(text=share_text, callback_data=f"share_series_{s['code']}")],
+        [InlineKeyboardButton(
+            text=share_text,
+            url=f"https://t.me/share/url?url={url_quote(deep_link)}"
+        )],
     ]
+    kb_list = list(kb.inline_keyboard) + extra_buttons
     kb = InlineKeyboardMarkup(inline_keyboard=kb_list)
 
     # FIX #9: poster_file_id None bo'lsa answer_photo xato bermasligi
@@ -393,11 +482,12 @@ async def show_profile(message: Message):
     watched, favs = await _profile_stats(user["tg_id"])
     premium_status = _premium_label(user, lang)
 
+    lang_label = "O'zbek \U0001f1fa\U0001f1ff" if lang == "uz" else "Ruscha \U0001f1f7\U0001f1fa"
     text = txt(
         f"👤 <b>Profil</b>\n\n"
         f"🆔 ID: <code>{user['tg_id']}</code>\n"
         f"👨 Ism: {user['full_name']}\n"
-        f"🌐 Til: {('O\'zbek 🇺🇿' if lang == 'uz' else 'Ruscha 🇷🇺')}\n"
+        f"🌐 Til: {lang_label}\n"
         f"⭐ Premium: {premium_status}\n"
         f"💰 Balans: {user['balance']} ball\n\n"
         f"📊 <b>Statistika</b>\n"
@@ -408,7 +498,7 @@ async def show_profile(message: Message):
         f"👤 <b>Профиль</b>\n\n"
         f"🆔 ID: <code>{user['tg_id']}</code>\n"
         f"👨 Имя: {user['full_name']}\n"
-        f"🌐 Yazyk: {('O\'zbek 🇺🇿' if lang == 'uz' else 'Ruscha 🇷🇺')}\n"
+        f"🌐 Yazyk: {lang_label}\n"
         f"⭐ Премиум: {premium_status}\n"
         f"💰 Баланс: {user['balance']} баллов\n\n"
         f"📊 <b>Статистика</b>\n"
@@ -1020,11 +1110,12 @@ async def search_process(message: Message, state: FSMContext):
 # ══════════════════════════════════════════════════════════════════════
 #  🎬 KINO KODI — Foydalanuvchi to'g'ridan kod yozsa
 # ══════════════════════════════════════════════════════════════════════
-@router.message(F.text.regexp(r'^\d{3,5}$'))
+@router.message(StateFilter(None), F.text.regexp(r'^\d{3,5}$'))
 async def handle_movie_code(message: Message):
     """
     Foydalanuvchi 3-5 xonali raqam yuborganda kino/serial qidiradi.
     Masalan: 847, 3291, 58043
+    FSM holati bo'lsa (admin jarayonlarda) bu handler ISHLAMAYDI.
     """
     code = message.text.strip()
     user = await get_user(message.from_user.id)
@@ -1388,74 +1479,6 @@ async def fav_toggle_movie(call: CallbackQuery):
         await db.commit()
 
     await call.answer(msg, show_alert=True)
-
-
-# ══════════════════════════════════════════════════════════════════════
-#  📤 ULASHISH — Kino/serial havolasini yuborish
-# ══════════════════════════════════════════════════════════════════════
-
-@router.callback_query(F.data.startswith("share_movie_"))
-async def share_movie_link(call: CallbackQuery):
-    """
-    'Kinoni ulashish' tugmasi bosilganda film uchun deep link yuboradi.
-    callback_data: share_movie_{code}
-    """
-    code = call.data.split("share_movie_", 1)[1]
-    user = await get_user(call.from_user.id)
-    lang = user["lang"] if user else "uz"
-
-    bot_info = await call.bot.get_me()
-    link = f"https://t.me/{bot_info.username}?start=movie_{code}"
-
-    if lang == "uz":
-        text = (
-            f"🔗 <b>Film havolasi:</b>\n\n"
-            f"<code>{link}</code>\n\n"
-            f"👆 Ushbu havolani do'stlaringizga yuboring — ular ham tomosha qilsin!"
-        )
-        toast = "✅ Havola tayyor!"
-    else:
-        text = (
-            f"🔗 <b>Ссылка на фильм:</b>\n\n"
-            f"<code>{link}</code>\n\n"
-            f"👆 Отправьте эту ссылку друзьям — пусть тоже посмотрят!"
-        )
-        toast = "✅ Ссылка готова!"
-
-    await call.message.answer(text, parse_mode="HTML")
-    await call.answer(toast, show_alert=False)
-
-
-@router.callback_query(F.data.startswith("share_series_"))
-async def share_series_link(call: CallbackQuery):
-    """
-    'Serialni ulashish' tugmasi bosilganda serial uchun deep link yuboradi.
-    callback_data: share_series_{code}
-    """
-    code = call.data.split("share_series_", 1)[1]
-    user = await get_user(call.from_user.id)
-    lang = user["lang"] if user else "uz"
-
-    bot_info = await call.bot.get_me()
-    link = f"https://t.me/{bot_info.username}?start=series_{code}"
-
-    if lang == "uz":
-        text = (
-            f"🔗 <b>Serial havolasi:</b>\n\n"
-            f"<code>{link}</code>\n\n"
-            f"👆 Ushbu havolani do'stlaringizga yuboring — ular ham tomosha qilsin!"
-        )
-        toast = "✅ Havola tayyor!"
-    else:
-        text = (
-            f"🔗 <b>Ссылка на сериал:</b>\n\n"
-            f"<code>{link}</code>\n\n"
-            f"👆 Отправьте эту ссылку друзьям — пусть тоже посмотрят!"
-        )
-        toast = "✅ Ссылка готова!"
-
-    await call.message.answer(text, parse_mode="HTML")
-    await call.answer(toast, show_alert=False)
 
 
 @router.callback_query(F.data.startswith("fav_series_"))

@@ -27,6 +27,7 @@ from aiogram.fsm.state import State, StatesGroup
 from bot.config import ADMINS, CHANNEL_PRIVATE
 from bot.database.db import get_db
 from bot.utils.admin_tools import generate_unique_code
+from bot.utils.helpers import get_protect_setting
 from bot.keyboards.admin_kb import cancel_fsm_kb, series_control_kb
 
 logger = logging.getLogger(__name__)
@@ -220,6 +221,27 @@ async def franchise_video(message: Message, state: FSMContext, bot: Bot):
         f"🎬 {data['title_uz']}",
         parse_mode="HTML"
     )
+
+    # Franshiza kino sevimlilarida bor userlarga bildirishnoma
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT user_id FROM favorites WHERE movie_id = ?", (data["movie_id"],)
+            ) as cur:
+                fav_users = await cur.fetchall()
+        for (uid,) in fav_users:
+            try:
+                await bot.send_message(
+                    uid,
+                    f"🎬 <b>{data['movie_title']}</b> filmiga yangi qism qo'shildi!\n\n"
+                    f"📽 {data['part_num']}-qism: <b>{data['title_uz']}</b>\n\n"
+                    f"Tomosha qilish uchun filmni oching.",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning("Franshiza bildirishnomasi xatosi: %s", e)
 
 
 
@@ -507,6 +529,28 @@ async def series_add_ep_video(message: Message, state: FSMContext, bot: Bot):
         reply_markup=_sae_control_kb()
     )
 
+    # Serial sevimlilarida bor userlarga bildirishnoma
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT user_id FROM favorites WHERE series_id = ?", (series_id,)
+            ) as cur:
+                fav_users = await cur.fetchall()
+        series_title = data.get("series_title", "")
+        for (uid,) in fav_users:
+            try:
+                await bot.send_message(
+                    uid,
+                    f"📺 <b>{series_title}</b> serialiga yangi qism qo'shildi!\n\n"
+                    f"📀 {season}-fasl, {ep_num}-qism\n\n"
+                    f"Tomosha qilish uchun serialingizni oching.",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning("Serial bildirishnomasi xatosi: %s", e)
+
 
 @router.callback_query(F.data == "sae_finish", F.from_user.id.in_(ADMINS))
 async def series_add_ep_finish(call: CallbackQuery, state: FSMContext):
@@ -611,6 +655,7 @@ async def cb_watch_franchise_part(call: CallbackQuery):
             return
 
     title = title_uz if lang == "uz" else (title_ru or title_uz)
+    protect = await get_protect_setting()
     await call.message.answer_video(
         video=file_id,
         caption=(
@@ -618,6 +663,6 @@ async def cb_watch_franchise_part(call: CallbackQuery):
             f"📽 {part_num}-qism: {title}"
         ),
         parse_mode="HTML",
-        protect_content=True
+        protect_content=protect
     )
     await call.answer()

@@ -187,12 +187,15 @@ async def save_film_final(call: CallbackQuery, state: FSMContext, bot: Bot):
         f"🍿 {data['description']}\n\n"
         f"👇 Tomosha qilish uchun tugmani bosing"
     )
-    watch_kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text="🎬 TOMOSHA QILISH",
-            url=f"https://t.me/{bot_user.username}?start=movie_{code}"
-        )
-    ]])
+    from urllib.parse import quote as url_quote
+    movie_deep = f"https://t.me/{bot_user.username}?start=movie_{code}"
+    watch_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎬 TOMOSHA QILISH", url=movie_deep)],
+        [InlineKeyboardButton(
+            text="📤 Do'stlarga ulashish",
+            url=f"https://t.me/share/url?url={url_quote(movie_deep)}"
+        )],
+    ])
     try:
         await bot.send_photo(
             chat_id=CHANNEL_PUBLIC,
@@ -390,12 +393,15 @@ async def process_series_finish_all(call: CallbackQuery, state: FSMContext, bot:
         f"🍿 {data['description']}\n\n"
         f"👇 Barcha fasl va qismlarni ko'rish uchun pastdagi tugmani bosing"
     )
-    watch_kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text="🎬 SERIALNI KO'RISH",
-            url=f"https://t.me/{bot_user.username}?start=series_{data['code']}"
-        )
-    ]])
+    from urllib.parse import quote as url_quote
+    series_deep = f"https://t.me/{bot_user.username}?start=series_{data['code']}"
+    watch_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎬 SERIALNI KO'RISH", url=series_deep)],
+        [InlineKeyboardButton(
+            text="📤 Do'stlarga ulashish",
+            url=f"https://t.me/share/url?url={url_quote(series_deep)}"
+        )],
+    ])
     try:
         await bot.send_photo(
             chat_id=CHANNEL_PUBLIC,

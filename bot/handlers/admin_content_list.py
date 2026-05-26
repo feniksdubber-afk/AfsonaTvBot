@@ -36,25 +36,52 @@ class EditContentState(StatesGroup):
 @router.message(F.text == "✏️ Kontentni tahrirlash", F.from_user.id.in_(ADMINS))
 async def admin_edit_start_process(message: Message, state: FSMContext):
     await state.set_state(EditContentState.waiting_code)
-    await message.answer("🔍 Tahrirlamoqchi bo'lgan kontent (Film yoki Serial) kodini yuboring:")
+    await message.answer(
+        "🔍 Tahrirlamoqchi bo'lgan kontent (Film yoki Serial) <b>kodi</b> yoki <b>nomini</b> yuboring:",
+        parse_mode="HTML"
+    )
 
 @router.message(EditContentState.waiting_code, F.text)
 async def process_find_content_to_edit(message: Message, state: FSMContext):
-    code = message.text.strip()
+    query = message.text.strip()
+    like  = f"%{query}%"
     await state.clear()
 
     async with get_db() as db:
+        # Avval kod bo'yicha aniq qidirish
         async with db.execute(
-            "SELECT id, title_uz, status FROM movies WHERE code = ?", (code,)
+            "SELECT id, title_uz, status FROM movies WHERE code = ?", (query,)
         ) as cur:
             movie = await cur.fetchone()
         async with db.execute(
-            "SELECT id, title_uz, status FROM series WHERE code = ?", (code,)
+            "SELECT id, title_uz, status FROM series WHERE code = ?", (query,)
         ) as cur:
             series = await cur.fetchone()
 
+        # Agar kod bo'yicha topilmasa — nom bo'yicha qidirish
+        if not movie and not series:
+            async with db.execute(
+                """SELECT id, title_uz, status FROM movies
+                   WHERE (title_uz LIKE ? OR title LIKE ? OR title_ru LIKE ?)
+                     AND status != 'deleted' LIMIT 1""",
+                (like, like, like)
+            ) as cur:
+                movie = await cur.fetchone()
+        if not movie and not series:
+            async with db.execute(
+                """SELECT id, title_uz, status FROM series
+                   WHERE (title_uz LIKE ? OR title_ru LIKE ?)
+                     AND status != 'deleted' LIMIT 1""",
+                (like, like)
+            ) as cur:
+                series = await cur.fetchone()
+
     if not movie and not series:
-        await message.answer("❌ Ushbu kod bilan hech qanday kino yoki serial topilmadi!")
+        await message.answer(
+            f"❌ <b>«{query}»</b> bo'yicha hech qanday kino yoki serial topilmadi!\n\n"
+            f"Kod yoki nom bo'yicha qayta urinib ko'ring.",
+            parse_mode="HTML"
+        )
         return
 
     is_movie = bool(movie)

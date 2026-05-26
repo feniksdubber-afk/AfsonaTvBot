@@ -40,6 +40,9 @@ async def admin_stats(message: Message):
         return
 
     today = datetime.now().strftime("%Y-%m-%d")
+    week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+    month_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+
     async with get_db() as db:
         async with db.execute("SELECT COUNT(*) FROM users") as cur:
             users = (await cur.fetchone())[0]
@@ -52,18 +55,61 @@ async def admin_stats(message: Message):
         async with db.execute(
             "SELECT COUNT(*) FROM users WHERE created_at LIKE ?", (f"{today}%",)
         ) as cur:
-            new_users = (await cur.fetchone())[0]
+            new_today = (await cur.fetchone())[0]
+        async with db.execute(
+            "SELECT COUNT(*) FROM users WHERE created_at >= ?", (week_ago,)
+        ) as cur:
+            new_week = (await cur.fetchone())[0]
+        async with db.execute(
+            "SELECT COUNT(*) FROM users WHERE created_at >= ?", (month_ago,)
+        ) as cur:
+            new_month = (await cur.fetchone())[0]
         async with db.execute("SELECT COUNT(*) FROM watch_history") as cur:
             total_views = (await cur.fetchone())[0]
+        async with db.execute(
+            "SELECT COUNT(*) FROM watch_history WHERE watched_at >= ?", (week_ago,)
+        ) as cur:
+            week_views = (await cur.fetchone())[0]
+        # TOP 5 kino
+        async with db.execute(
+            """SELECT COALESCE(title_uz, title, 'Nomsiz'), code, views
+               FROM movies WHERE status = 'active'
+               ORDER BY views DESC LIMIT 5"""
+        ) as cur:
+            top_movies = await cur.fetchall()
+        # TOP 3 serial
+        async with db.execute(
+            """SELECT COALESCE(title_uz, 'Nomsiz serial'), code,
+                      (SELECT COUNT(*) FROM watch_history WHERE series_id = s.id) as wc
+               FROM series s WHERE status = 'active'
+               ORDER BY wc DESC LIMIT 3"""
+        ) as cur:
+            top_series = await cur.fetchall()
+
+    top_movies_text = ""
+    for i, (t, c, v) in enumerate(top_movies, 1):
+        top_movies_text += f"  {i}. <code>{c}</code> — {t} 👁{v:,}\n"
+
+    top_series_text = ""
+    for i, (t, c, v) in enumerate(top_series, 1):
+        top_series_text += f"  {i}. <code>{c}</code> — {t} 👁{v:,}\n"
 
     text = (
         f"📊 <b>Bot Statistikasi</b>\n\n"
-        f"👥 Umumiy a'zolar: <b>{users} ta</b>\n"
-        f"📈 Bugun qo'shilganlar: <b>{new_users} ta</b>\n"
-        f"⭐ Premium a'zolar: <b>{premiums} ta</b>\n\n"
-        f"🎬 Aktiv kinolar: <b>{movies} ta</b>\n"
-        f"📺 Aktiv seriallar: <b>{series} ta</b>\n"
-        f"👁 Jami ko'rishlar: <b>{total_views} ta</b>\n"
+        f"👥 <b>A'zolar:</b>\n"
+        f"  • Jami: <b>{users:,} ta</b>\n"
+        f"  • Bugun: <b>+{new_today} ta</b>\n"
+        f"  • Hafta: <b>+{new_week} ta</b>\n"
+        f"  • Oy: <b>+{new_month} ta</b>\n"
+        f"  • Premium: <b>{premiums} ta</b>\n\n"
+        f"🎬 <b>Kontent:</b>\n"
+        f"  • Kinolar: <b>{movies} ta</b>\n"
+        f"  • Seriallar: <b>{series} ta</b>\n\n"
+        f"👁 <b>Ko'rishlar:</b>\n"
+        f"  • Jami: <b>{total_views:,} ta</b>\n"
+        f"  • Bu hafta: <b>{week_views:,} ta</b>\n\n"
+        f"🏆 <b>TOP 5 Kino:</b>\n{top_movies_text}\n"
+        f"📺 <b>TOP 3 Serial:</b>\n{top_series_text}"
     )
     await message.answer(text, parse_mode="HTML")
 

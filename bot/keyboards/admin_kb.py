@@ -7,7 +7,8 @@ def admin_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="📺 Serialga qism qo'shish"), KeyboardButton(text="🎞 Franshizaga qism qo'shish")],
             [KeyboardButton(text="📋 Kinolar ro'yxati"), KeyboardButton(text="📢 Broadcast")],
             [KeyboardButton(text="👥 Foydalanuvchilar"), KeyboardButton(text="📊 Statistika")],
-            [KeyboardButton(text="🔧 Sozlamalar"),    KeyboardButton(text="📨 Kino so'rovlar")],
+            [KeyboardButton(text="🔍 User qidirish"),  KeyboardButton(text="📨 Kino so'rovlar")],
+            [KeyboardButton(text="🔧 Sozlamalar")],
             [KeyboardButton(text="🏠 Bosh menyu")],
         ],
         resize_keyboard=True

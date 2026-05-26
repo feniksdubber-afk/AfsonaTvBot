@@ -41,6 +41,9 @@ from bot.handlers import (
 from bot.handlers import subscription as subscription_handler
 from bot.handlers import inline_search
 from bot.handlers import admin_channels
+from bot.handlers import omdb          # #7 OMDb qidiruvi
+from bot.handlers import franchise     # #3 Franshiza va serialga qism
+from bot.handlers import admin_edit    # #6 To'liq tahrirlash
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.subscription import SubscriptionMiddleware
 from bot.utils.scheduler import setup_scheduler
@@ -89,6 +92,9 @@ async def main() -> None:
     dp.include_router(admin.router)                  # 6
     dp.include_router(premium.router)                # 7
     dp.include_router(gamification.router)           # 8
+    dp.include_router(omdb.router)                   # 9  OMDb qidiruvi
+    dp.include_router(franchise.router)              # 10 Franshiza / serialga qism
+    dp.include_router(admin_edit.router)             # 11 To'liq tahrirlash
 
     # ── Scheduler ────────────────────────────────────────────────────
     scheduler = setup_scheduler(bot)

@@ -259,10 +259,29 @@ async def _send_movie_by_code(message: Message, code: str, lang: str = "uz", use
         return
 
     title = m.get("title_uz") or m.get("title") or "Nomsiz kino"
+
+    # OMDb cache dan IMDB reyting olish
+    imdb_line = ""
+    try:
+        import json as _json
+        title_q = title.lower()
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT data FROM omdb_cache WHERE LOWER(query) = ?", (title_q,)
+            ) as cur:
+                omdb_row = await cur.fetchone()
+        if omdb_row:
+            odata = _json.loads(omdb_row[0])
+            ir = odata.get("imdbRating", "")
+            if ir and ir != "N/A":
+                imdb_line = f"\n⭐ IMDb: <b>{ir}/10</b>"
+    except Exception:
+        pass
+
     caption = (
         f"🎬 <b>{title}</b> ({m.get('year', '?')})\n"
         f"🎭 {m.get('genres') or m.get('genre', '') or '—'}\n"
-        f"🌍 {m.get('country', '') or '—'}\n\n"
+        f"🌍 {m.get('country', '') or '—'}{imdb_line}\n\n"
         f"🍿 {m.get('description', '') or ''}"
     )
 
@@ -1433,6 +1452,210 @@ async def back_watch_menu(call: CallbackQuery):
     except Exception:
         pass
     await call.answer()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  🎲 TASODIFIY KINO
+# ══════════════════════════════════════════════════════════════════════
+@router.callback_query(F.data == "random_movie")
+async def cb_random_movie(call: CallbackQuery):
+    user = await get_user(call.from_user.id)
+    lang = user["lang"] if user else "uz"
+    is_prem = user.get("is_premium", 0) if user else 0
+
+    async with get_db() as db:
+        query = (
+            "SELECT code FROM movies WHERE status = 'active' ORDER BY RANDOM() LIMIT 1"
+            if is_prem else
+            "SELECT code FROM movies WHERE status = 'active' AND is_premium = 0 ORDER BY RANDOM() LIMIT 1"
+        )
+        async with db.execute(query) as cur:
+            row = await cur.fetchone()
+
+    await call.answer()
+    if not row:
+        await call.message.answer(txt("❌ Kinolar topilmadi!", "❌ Фильмы не найдены!", lang))
+        return
+    await _send_movie_by_code(call.message, row[0], lang, user_id=call.from_user.id)
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  🎭 JANRLAR BO'YICHA KO'RISH
+# ══════════════════════════════════════════════════════════════════════
+@router.callback_query(F.data == "genre_list")
+async def cb_genre_list(call: CallbackQuery):
+    user = await get_user(call.from_user.id)
+    lang = user["lang"] if user else "uz"
+
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT genres FROM movies WHERE status = 'active' AND genres IS NOT NULL"
+        ) as cur:
+            rows = await cur.fetchall()
+
+    genre_set = set()
+    for (genres_raw,) in rows:
+        for g in genres_raw.replace("\n", ",").split(","):
+            g = g.strip()
+            if g:
+                genre_set.add(g)
+
+    genres_sorted = sorted(genre_set)[:20]
+    buttons = []
+    for i in range(0, len(genres_sorted), 2):
+        row_btns = [InlineKeyboardButton(
+            text=genres_sorted[i], callback_data=f"genre_movies_{genres_sorted[i][:30]}_0"
+        )]
+        if i + 1 < len(genres_sorted):
+            row_btns.append(InlineKeyboardButton(
+                text=genres_sorted[i + 1], callback_data=f"genre_movies_{genres_sorted[i+1][:30]}_0"
+            ))
+        buttons.append(row_btns)
+    buttons.append([InlineKeyboardButton(
+        text=txt("◀️ Orqaga", "◀️ Назад", lang), callback_data="back_watch_menu"
+    )])
+
+    title = txt("🎭 <b>Janrni tanlang:</b>", "🎭 <b>Выберите жанр:</b>", lang)
+    try:
+        await call.message.edit_text(title, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="HTML")
+    except Exception:
+        await call.message.answer(title, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="HTML")
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("genre_movies_"))
+async def cb_genre_movies(call: CallbackQuery):
+    user = await get_user(call.from_user.id)
+    lang = user["lang"] if user else "uz"
+
+    parts = call.data.split("_")
+    page = int(parts[-1]) if parts[-1].isdigit() else 0
+    genre = "_".join(parts[2:-1])
+
+    per_page = 8
+    offset = page * per_page
+
+    async with get_db() as db:
+        async with db.execute(
+            """SELECT code, COALESCE(title_uz, title, 'Nomsiz') as title, year, is_premium
+               FROM movies
+               WHERE status = 'active' AND (genres LIKE ? OR genre LIKE ?)
+               ORDER BY views DESC LIMIT ? OFFSET ?""",
+            (f"%{genre}%", f"%{genre}%", per_page + 1, offset)
+        ) as cur:
+            rows = await cur.fetchall()
+
+    has_next = len(rows) > per_page
+    rows = rows[:per_page]
+
+    if not rows:
+        await call.answer(txt("Bu janrda film yo'q!", "Нет фильмов в этом жанре!", lang), show_alert=True)
+        return
+
+    lines = []
+    for code, title, year, is_prem_flag in rows:
+        icon = "⭐" if is_prem_flag else "🎬"
+        y = f"({year})" if year else ""
+        lines.append(f"{icon} <code>{code}</code> — {title} {y}")
+
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"genre_movies_{genre}_{page-1}"))
+    if has_next:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"genre_movies_{genre}_{page+1}"))
+
+    buttons = []
+    if nav:
+        buttons.append(nav)
+    buttons.append([InlineKeyboardButton(
+        text=txt("◀️ Janrlar", "◀️ Жанры", lang), callback_data="genre_list"
+    )])
+
+    text = (
+        txt(f"🎭 <b>{genre}</b> janridagi kinolar:\n\n",
+            f"🎭 Фильмы жанра <b>{genre}</b>:\n\n", lang)
+        + "\n".join(lines)
+        + txt("\n\n📌 Kod yuboring → kino ochiladi", "\n\n📌 Отправьте код → откроется фильм", lang)
+    )
+    try:
+        await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="HTML")
+    except Exception:
+        await call.message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="HTML")
+    await call.answer()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  👍👎 LIKE / DISLIKE
+# ══════════════════════════════════════════════════════════════════════
+async def _ensure_reactions_table():
+    async with get_db() as db:
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS movie_reactions (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id  INTEGER NOT NULL,
+                movie_id INTEGER NOT NULL,
+                reaction TEXT NOT NULL,
+                UNIQUE(user_id, movie_id)
+            )"""
+        )
+        await db.commit()
+
+
+@router.callback_query(F.data.startswith("react_like_"))
+@router.callback_query(F.data.startswith("react_dislike_"))
+async def cb_movie_react(call: CallbackQuery):
+    user = await get_user(call.from_user.id)
+    lang = user["lang"] if user else "uz"
+
+    is_like  = call.data.startswith("react_like_")
+    movie_id = int(call.data.split("_")[-1])
+    reaction = "like" if is_like else "dislike"
+
+    await _ensure_reactions_table()
+
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT reaction FROM movie_reactions WHERE user_id = ? AND movie_id = ?",
+            (call.from_user.id, movie_id)
+        ) as cur:
+            existing = await cur.fetchone()
+
+        if existing:
+            if existing[0] == reaction:
+                await call.answer(
+                    txt("Siz allaqachon bu reaksiyani qoldirdingiz!",
+                        "Вы уже оставили эту реакцию!", lang),
+                    show_alert=False
+                )
+                return
+            await db.execute(
+                "UPDATE movie_reactions SET reaction = ? WHERE user_id = ? AND movie_id = ?",
+                (reaction, call.from_user.id, movie_id)
+            )
+        else:
+            await db.execute(
+                "INSERT INTO movie_reactions (user_id, movie_id, reaction) VALUES (?, ?, ?)",
+                (call.from_user.id, movie_id, reaction)
+            )
+        await db.commit()
+
+        async with db.execute(
+            "SELECT COUNT(*) FROM movie_reactions WHERE movie_id = ? AND reaction = 'like'",
+            (movie_id,)
+        ) as cur:
+            likes = (await cur.fetchone())[0]
+        async with db.execute(
+            "SELECT COUNT(*) FROM movie_reactions WHERE movie_id = ? AND reaction = 'dislike'",
+            (movie_id,)
+        ) as cur:
+            dislikes = (await cur.fetchone())[0]
+
+    emoji = "👍" if is_like else "👎"
+    await call.answer(
+        txt(f"{emoji} Rahmat! 👍{likes} 👎{dislikes}",
+            f"{emoji} Спасибо! 👍{likes} 👎{dislikes}", lang),
+        show_alert=False
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════

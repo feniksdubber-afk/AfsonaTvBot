@@ -71,40 +71,129 @@ async def admin_users_list(message: Message):
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
+class UserSearchState(StatesGroup):
+    waiting = State()
+
+
+@router.message(F.text == "🔍 User qidirish", F.from_user.id.in_(ADMINS))
+async def admin_user_search_start(message: Message, state: FSMContext):
+    await state.set_state(UserSearchState.waiting)
+    await message.answer(
+        "🔍 Foydalanuvchi <b>ID</b>, <b>@username</b> yoki <b>ism</b>ini yuboring:",
+        parse_mode="HTML"
+    )
+
+
+@router.message(UserSearchState.waiting, F.from_user.id.in_(ADMINS))
+async def admin_user_search_process(message: Message, state: FSMContext):
+    await state.clear()
+    query = message.text.strip().lstrip("@")
+    await _show_user_detail_by_query(message, query)
+
+
 @router.message(F.text.startswith("/user_"), F.from_user.id.in_(ADMINS))
 async def admin_user_detail(message: Message):
-    try:
-        user_id = int(message.text.split("_")[1])
-    except (IndexError, ValueError):
+    query = message.text.split("_", 1)[1] if "_" in message.text else ""
+    if not query:
         await message.answer("❌ Format: /user_123456")
         return
+    await _show_user_detail_by_query(message, query)
 
+
+async def _show_user_detail_by_query(message: Message, query: str):
     async with get_db() as db:
-        async with db.execute("SELECT * FROM users WHERE tg_id = ?", (user_id,)) as cur:
-            row = await cur.fetchone()
-            if not row:
-                await message.answer("❌ Foydalanuvchi topilmadi.")
-                return
-            cols = [d[0] for d in cur.description]
-            u = dict(zip(cols, row))
+        u = None
+        # 1. ID bo'yicha
+        if query.lstrip("-").isdigit():
+            async with db.execute("SELECT * FROM users WHERE tg_id = ?", (int(query),)) as cur:
+                row = await cur.fetchone()
+                if row:
+                    cols = [d[0] for d in cur.description]
+                    u = dict(zip(cols, row))
+        # 2. Username bo'yicha
+        if not u:
+            async with db.execute(
+                "SELECT * FROM users WHERE LOWER(username) = LOWER(?)", (query,)
+            ) as cur:
+                row = await cur.fetchone()
+                if row:
+                    cols = [d[0] for d in cur.description]
+                    u = dict(zip(cols, row))
+        # 3. Ism bo'yicha
+        if not u:
+            async with db.execute(
+                "SELECT * FROM users WHERE full_name LIKE ? LIMIT 1", (f"%{query}%",)
+            ) as cur:
+                row = await cur.fetchone()
+                if row:
+                    cols = [d[0] for d in cur.description]
+                    u = dict(zip(cols, row))
 
-    prem_label = "Ha" if u["is_premium"] else "Yoq"
-    ban_label  = "Ha" if u["is_banned"]  else "Yoq"
+        if not u:
+            await message.answer(f"❌ <b>«{query}»</b> bo'yicha foydalanuvchi topilmadi.", parse_mode="HTML")
+            return
+
+        # Ko'rish tarixi (oxirgi 5 ta)
+        async with db.execute(
+            """SELECT
+                 COALESCE(m.title_uz, m.title, s.title_uz, 'Nomsiz') as title,
+                 CASE WHEN h.movie_id IS NOT NULL THEN '🎬' ELSE '📺' END as icon,
+                 h.watched_at
+               FROM watch_history h
+               LEFT JOIN movies m ON m.id = h.movie_id
+               LEFT JOIN series s ON s.id = h.series_id
+               WHERE h.user_id = ?
+               ORDER BY h.watched_at DESC LIMIT 5""",
+            (u["tg_id"],)
+        ) as cur:
+            history = await cur.fetchall()
+
+        async with db.execute(
+            "SELECT COUNT(*) FROM watch_history WHERE user_id = ?", (u["tg_id"],)
+        ) as cur:
+            watch_total = (await cur.fetchone())[0]
+
+        async with db.execute(
+            "SELECT COUNT(*) FROM favorites WHERE user_id = ?", (u["tg_id"],)
+        ) as cur:
+            fav_total = (await cur.fetchone())[0]
+
+        async with db.execute(
+            "SELECT COUNT(*) FROM users WHERE referrer_id = ?", (u["tg_id"],)
+        ) as cur:
+            referral_total = (await cur.fetchone())[0]
+
+    prem_label = "✅ Ha" if u["is_premium"] else "❌ Yo'q"
+    ban_label  = "🚫 Ha" if u["is_banned"]  else "✅ Yo'q"
+    prem_until = u.get("premium_until") or "—"
+
+    history_text = ""
+    for title, icon, watched_at in history:
+        date = (watched_at or "")[:10]
+        history_text += f"  {icon} {title} <i>({date})</i>\n"
+    if not history_text:
+        history_text = "  — hali hech narsa ko'rмади\n"
+
     text = (
-        f"👤 <b>Foydalanuvchi</b>\n\n"
+        f"👤 <b>Foydalanuvchi ma'lumotlari</b>\n\n"
         f"🆔 ID: <code>{u['tg_id']}</code>\n"
         f"👨 Ism: {u['full_name']}\n"
-        f"@username: {u.get('username') or '—'}\n"
+        f"🔗 Username: {'@' + u['username'] if u.get('username') else '—'}\n"
         f"🌐 Til: {u['lang']}\n"
+        f"📅 Ro'yxatdan: {(u.get('created_at') or '')[:10]}\n\n"
         f"⭐ Premium: {prem_label}\n"
-        f"📅 Premium muddat: {u.get('premium_until') or '—'}\n"
+        f"📅 Premium muddat: {prem_until}\n"
         f"💰 Balans: {u['balance']} ball\n"
-        f"🚫 Ban: {ban_label}\n"
-        f"📅 Qo'shildi: {u.get('created_at', '?')[:10]}"
+        f"🚫 Ban: {ban_label}\n\n"
+        f"📊 <b>Faollik:</b>\n"
+        f"  🎬 Ko'rishlar: {watch_total} ta\n"
+        f"  ❤️ Sevimlilar: {fav_total} ta\n"
+        f"  👥 Referrallar: {referral_total} ta\n\n"
+        f"🕓 <b>Oxirgi ko'rilganlar:</b>\n{history_text}"
     )
     await message.answer(
         text,
-        reply_markup=user_manage_kb(u['tg_id'], u['is_banned']),
+        reply_markup=user_manage_kb(u["tg_id"], u["is_banned"]),
         parse_mode="HTML"
     )
 

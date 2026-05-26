@@ -4,8 +4,8 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 
 def main_menu(lang: str = "uz") -> ReplyKeyboardMarkup:
     texts = {
-        "uz": ["🎬 Kinolar", "⭐ Premium", "👤 Profil", "🔍 Qidirish", "📋 So'rov", "📞 Support"],
-        "ru": ["🎬 Фильмы", "⭐ Премиум", "👤 Профиль", "🔍 Поиск", "📋 Запрос", "📞 Поддержка"]
+        "uz": ["🍿 Tomosha qilish", "⭐ Premium", "👤 Profil", "🔍 Qidirish", "📋 So'rov", "📞 Support"],
+        "ru": ["🍿 Смотреть", "⭐ Премиум", "👤 Профиль", "🔍 Поиск", "📋 Запрос", "📞 Поддержка"]
     }
     t = texts.get(lang, texts["uz"])
     return ReplyKeyboardMarkup(
@@ -155,3 +155,66 @@ def admin_payment_kb(payment_id: int, user_id: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"confirm_pay_{payment_id}_{user_id}"),
         InlineKeyboardButton(text="❌ Rad etish",  callback_data=f"reject_pay_{payment_id}_{user_id}"),
     ]])
+
+def cancel_kb(lang: str = "uz") -> InlineKeyboardMarkup:
+    """Support va So'rov uchun bekor qilish tugmasi."""
+    text = "❌ Bekor qilish" if lang == "uz" else "❌ Отмена"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=text, callback_data="cancel_input")]
+    ])
+
+
+def content_menu_kb(lang: str = "uz") -> InlineKeyboardMarkup:
+    """Tomosha qilish menyusi — Film yoki Serial tanlash."""
+    if lang == "uz":
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🎬 Filmlar", callback_data="browse_movies_0"),
+                InlineKeyboardButton(text="📺 Seriallar", callback_data="browse_series_0"),
+            ],
+            [InlineKeyboardButton(text="🔥 Eng mashhurlar", callback_data="browse_top")],
+        ])
+    else:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🎬 Фильмы", callback_data="browse_movies_0"),
+                InlineKeyboardButton(text="📺 Сериалы", callback_data="browse_series_0"),
+            ],
+            [InlineKeyboardButton(text="🔥 Самые популярные", callback_data="browse_top")],
+        ])
+
+
+def movie_view_kb(movie_id: int, code: str, is_fav: bool,
+                  lang: str = "uz") -> InlineKeyboardMarkup:
+    """Kino ko'rsatilganda chiqadigan tugmalar."""
+    fav_text = (
+        ("❤️ Sevimlilardan olib tashlash" if is_fav else "🤍 Sevimlilarga qo'shish")
+        if lang == "uz" else
+        ("❤️ Убрать из избранного" if is_fav else "🤍 Добавить в избранное")
+    )
+    watch_text = "▶️ Tomosha qilish" if lang == "uz" else "▶️ Смотреть"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=watch_text,
+            url=f"https://t.me/{{bot_username}}?start=movie_{code}"
+        )],
+        [InlineKeyboardButton(text=fav_text, callback_data=f"fav_toggle_{movie_id}")],
+    ])
+
+def series_view_kb(series_id: int, code: str, is_fav: bool,
+                   lang: str = "uz") -> InlineKeyboardMarkup:
+    """Serial ko'rsatilganda chiqadigan tugmalar."""
+    fav_text = (
+        ("❤️ Sevimlilardan olib tashlash" if is_fav else "🤍 Sevimlilarga qo'shish")
+        if lang == "uz" else
+        ("❤️ Убрать из избранного" if is_fav else "🤍 Добавить в избранное")
+    )
+    watch_text = "▶️ Tomosha qilish" if lang == "uz" else "▶️ Смотреть"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=watch_text,
+            callback_data=f"watch_series_{series_id}"
+        )],
+        [InlineKeyboardButton(text=fav_text, callback_data=f"fav_series_{series_id}")],
+    ])
+

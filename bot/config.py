@@ -47,10 +47,4 @@ except ValueError:
 # ── Ma'lumotlar bazasi ────────────────────────────────────────────
 DB_PATH: str = os.getenv("DB_PATH", "data/kinobot.db")
 
-# ── To'lov tizimlari (ixtiyoriy) ─────────────────────────────────
-CLICK_SERVICE_ID:  str = os.getenv("CLICK_SERVICE_ID",  "")
-CLICK_MERCHANT_ID: str = os.getenv("CLICK_MERCHANT_ID", "")
-CLICK_SECRET_KEY:  str = os.getenv("CLICK_SECRET_KEY",  "")
-
-PAYME_MERCHANT_ID: str = os.getenv("PAYME_MERCHANT_ID", "")
-PAYME_SECRET_KEY:  str = os.getenv("PAYME_SECRET_KEY",  "")
+# To'lov: faqat karta + screenshot (manual). Click/Payme o'chirilgan.

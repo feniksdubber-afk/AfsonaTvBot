@@ -24,33 +24,13 @@ from aiogram.fsm.state import State, StatesGroup
 
 from bot.config import ADMINS
 from bot.database.db import get_db
+from bot.utils.helpers import get_user, get_user_lang, txt, is_admin
 
 router = Router()
 
 # ═══════════════════════════════════════════════════════════════════
 #  YORDAMCHI FUNKSIYALAR
 # ═══════════════════════════════════════════════════════════════════
-
-def txt(uz: str, ru: str, lang: str) -> str:
-    return uz if lang == "uz" else ru
-
-def is_admin(user_id: int) -> bool:
-    return user_id in ADMINS
-
-async def get_user(tg_id: int) -> dict | None:
-    async with get_db() as db:
-        async with db.execute(
-            "SELECT * FROM users WHERE tg_id = ?", (tg_id,)
-        ) as cur:
-            row = await cur.fetchone()
-            if row:
-                cols = [d[0] for d in cur.description]
-                return dict(zip(cols, row))
-    return None
-
-async def get_user_lang(tg_id: int) -> str:
-    u = await get_user(tg_id)
-    return u["lang"] if u else "uz"
 
 # ─── Ball qo'shish (istalgan joydan chaqirib ishlatiladi) ───────────
 async def add_points(user_id: int, amount: int, reason: str = "") -> int:

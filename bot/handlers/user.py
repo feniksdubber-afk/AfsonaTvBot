@@ -30,6 +30,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 from bot.config import ADMINS
 from bot.database.db import get_db
+from bot.utils.helpers import get_user, txt, is_admin
 from bot.keyboards.user_kb import (
     main_menu, profile_kb, lang_kb,
     notify_kb, back_kb, cancel_kb, content_menu_kb
@@ -54,21 +55,6 @@ class SearchState(StatesGroup):
 # ══════════════════════════════════════════════════════════════════════
 #  YORDAMCHI FUNKSIYALAR
 # ══════════════════════════════════════════════════════════════════════
-async def get_user(tg_id: int) -> dict | None:
-    async with get_db() as db:
-        async with db.execute(
-            "SELECT * FROM users WHERE tg_id = ?", (tg_id,)
-        ) as cur:
-            row = await cur.fetchone()
-            if row:
-                cols = [d[0] for d in cur.description]
-                return dict(zip(cols, row))
-    return None
-
-
-def txt(uz: str, ru: str, lang: str) -> str:
-    return uz if lang == "uz" else ru
-
 
 def _premium_label(user: dict, lang: str) -> str:
     if user.get("is_premium"):

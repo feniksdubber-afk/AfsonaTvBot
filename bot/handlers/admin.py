@@ -22,13 +22,9 @@ from bot.keyboards.admin_kb import (
 from bot.keyboards import admin_kb as custom_admin_kb
 from bot.keyboards.user_kb import main_menu
 from bot.utils.admin_tools import generate_unique_code
+from bot.utils.helpers import is_admin, get_user, txt
 
 router = Router()
-
-# ── Admin filter ───────────────────────────────────────────────────────
-def is_admin(user_id: int) -> bool:
-    return user_id in ADMINS
-
 
 # ── FSM STATES ─────────────────────────────────────────────────────────
 class FilmStates(StatesGroup):

@@ -24,6 +24,7 @@ from bot.keyboards.user_kb import (
     main_menu, premium_tariffs_kb,
     admin_payment_kb,
 )
+from bot.utils.helpers import get_user, txt
 
 router = Router()
 
@@ -36,13 +37,6 @@ class PromoState(StatesGroup):
     waiting_code = State()
 
 # ── Helpers ────────────────────────────────────────────
-async def get_user(tg_id: int) -> dict | None:
-    async with get_db() as db:
-        async with db.execute("SELECT * FROM users WHERE tg_id = ?", (tg_id,)) as cur:
-            row = await cur.fetchone()
-            if row:
-                return dict(zip([d[0] for d in cur.description], row))
-    return None
 
 async def get_tariffs() -> list:
     async with get_db() as db:
@@ -86,10 +80,6 @@ async def activate_premium(user_id: int, days: int):
         )
         await db.commit()
     return new_until
-
-def txt(uz, ru, lang):
-    return uz if lang == "uz" else ru
-
 
 # ════════════════════════════════════════════════════════
 #  ⭐ PREMIUM KO'RSATISH

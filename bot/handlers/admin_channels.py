@@ -19,12 +19,9 @@ from bot.utils.channels import (
     set_required_channels,
     fetch_channel_info
 )
+from bot.utils.helpers import is_admin
 
 router = Router()
-
-
-def is_admin(uid: int) -> bool:
-    return uid in ADMINS
 
 
 # ─── FSM ────────────────────────────────────────────────────────────

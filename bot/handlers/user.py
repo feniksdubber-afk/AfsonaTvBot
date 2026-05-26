@@ -346,14 +346,16 @@ async def _send_series_by_code(message: Message, code: str, lang: str = "uz", us
     except Exception:
         is_fav = False
 
-    # Fasllar KB ga sevimli tugmasini qo'shamiz
+    # Fasllar KB ga sevimli va ulashish tugmalarini qo'shamiz
     fav_text = (
         ("❤️ Sevimlilardan olib tashlash" if is_fav else "🤍 Sevimlilarga qo'shish")
         if lang == "uz" else
         ("❤️ Убрать из избранного" if is_fav else "🤍 Добавить в избранное")
     )
+    share_text = "📤 Serialni ulashish" if lang == "uz" else "📤 Поделиться сериалом"
     kb_list = list(kb.inline_keyboard) + [
-        [InlineKeyboardButton(text=fav_text, callback_data=f"fav_series_{s['id']}")]
+        [InlineKeyboardButton(text=fav_text, callback_data=f"fav_series_{s['id']}")],
+        [InlineKeyboardButton(text=share_text, callback_data=f"share_series_{s['code']}")],
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=kb_list)
 
@@ -1386,6 +1388,74 @@ async def fav_toggle_movie(call: CallbackQuery):
         await db.commit()
 
     await call.answer(msg, show_alert=True)
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  📤 ULASHISH — Kino/serial havolasini yuborish
+# ══════════════════════════════════════════════════════════════════════
+
+@router.callback_query(F.data.startswith("share_movie_"))
+async def share_movie_link(call: CallbackQuery):
+    """
+    'Kinoni ulashish' tugmasi bosilganda film uchun deep link yuboradi.
+    callback_data: share_movie_{code}
+    """
+    code = call.data.split("share_movie_", 1)[1]
+    user = await get_user(call.from_user.id)
+    lang = user["lang"] if user else "uz"
+
+    bot_info = await call.bot.get_me()
+    link = f"https://t.me/{bot_info.username}?start=movie_{code}"
+
+    if lang == "uz":
+        text = (
+            f"🔗 <b>Film havolasi:</b>\n\n"
+            f"<code>{link}</code>\n\n"
+            f"👆 Ushbu havolani do'stlaringizga yuboring — ular ham tomosha qilsin!"
+        )
+        toast = "✅ Havola tayyor!"
+    else:
+        text = (
+            f"🔗 <b>Ссылка на фильм:</b>\n\n"
+            f"<code>{link}</code>\n\n"
+            f"👆 Отправьте эту ссылку друзьям — пусть тоже посмотрят!"
+        )
+        toast = "✅ Ссылка готова!"
+
+    await call.message.answer(text, parse_mode="HTML")
+    await call.answer(toast, show_alert=False)
+
+
+@router.callback_query(F.data.startswith("share_series_"))
+async def share_series_link(call: CallbackQuery):
+    """
+    'Serialni ulashish' tugmasi bosilganda serial uchun deep link yuboradi.
+    callback_data: share_series_{code}
+    """
+    code = call.data.split("share_series_", 1)[1]
+    user = await get_user(call.from_user.id)
+    lang = user["lang"] if user else "uz"
+
+    bot_info = await call.bot.get_me()
+    link = f"https://t.me/{bot_info.username}?start=series_{code}"
+
+    if lang == "uz":
+        text = (
+            f"🔗 <b>Serial havolasi:</b>\n\n"
+            f"<code>{link}</code>\n\n"
+            f"👆 Ushbu havolani do'stlaringizga yuboring — ular ham tomosha qilsin!"
+        )
+        toast = "✅ Havola tayyor!"
+    else:
+        text = (
+            f"🔗 <b>Ссылка на сериал:</b>\n\n"
+            f"<code>{link}</code>\n\n"
+            f"👆 Отправьте эту ссылку друзьям — пусть тоже посмотрят!"
+        )
+        toast = "✅ Ссылка готова!"
+
+    await call.message.answer(text, parse_mode="HTML")
+    await call.answer(toast, show_alert=False)
 
 
 @router.callback_query(F.data.startswith("fav_series_"))

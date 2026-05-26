@@ -333,12 +333,15 @@ async def _send_series_by_code(message: Message, code: str, lang: str = "uz"):
     )
 
     # Sevimlida borligini tekshirish
-    async with get_db() as db:
-        async with db.execute(
-            "SELECT id FROM favorites WHERE user_id = ? AND series_id = ?",
-            (message.from_user.id, s["id"])
-        ) as cur:
-            is_fav = (await cur.fetchone()) is not None
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id FROM favorites WHERE user_id = ? AND series_id = ?",
+                (message.from_user.id, s["id"])
+            ) as cur:
+                is_fav = (await cur.fetchone()) is not None
+    except Exception:
+        is_fav = False
 
     # Fasllar KB ga sevimli tugmasini qo'shamiz
     fav_text = (
@@ -346,22 +349,30 @@ async def _send_series_by_code(message: Message, code: str, lang: str = "uz"):
         if lang == "uz" else
         ("❤️ Убрать из избранного" if is_fav else "🤍 Добавить в избранное")
     )
-    from aiogram.types import InlineKeyboardButton
-    kb.inline_keyboard.append([
-        InlineKeyboardButton(text=fav_text, callback_data=f"fav_series_{s['id']}")
-    ])
+    kb_list = list(kb.inline_keyboard) + [
+        [InlineKeyboardButton(text=fav_text, callback_data=f"fav_series_{s['id']}")]
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=kb_list)
 
     # FIX #9: poster_file_id None bo'lsa answer_photo xato bermasligi
-    if s.get("poster_file_id"):
-        await message.answer_photo(
-            photo=s["poster_file_id"],
-            caption=caption,
-            reply_markup=kb,
-            parse_mode="HTML",
-            protect_content=True
-        )
-    else:
-        await message.answer(caption, reply_markup=kb, parse_mode="HTML")
+    try:
+        if s.get("poster_file_id"):
+            await message.answer_photo(
+                photo=s["poster_file_id"],
+                caption=caption,
+                reply_markup=kb,
+                parse_mode="HTML",
+                protect_content=True
+            )
+        else:
+            await message.answer(caption, reply_markup=kb, parse_mode="HTML")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error("_send_series_by_code yuborishda xato: %s", e)
+        try:
+            await message.answer(caption, reply_markup=kb, parse_mode="HTML")
+        except Exception:
+            pass
 
 
 # ══════════════════════════════════════════════════════════════════════

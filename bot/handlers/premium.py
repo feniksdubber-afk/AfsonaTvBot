@@ -22,7 +22,7 @@ from bot.config import ADMINS
 from bot.database.db import get_db
 from bot.keyboards.user_kb import (
     main_menu, premium_tariffs_kb,
-    admin_payment_kb, back_kb
+    admin_payment_kb,
 )
 
 router = Router()
@@ -394,9 +394,13 @@ async def promo_check(message: Message, state: FSMContext):
 
         promo = dict(zip([d[0] for d in cur.description], row))
 
+        # Foydalanuvchi bu promokodni ishlatganmi tekshiramiz
+        # promo id ni negative qilib user_tasks ga yozish — noto'g'ri hack.
+        # To'g'ri: alohida ustun yoki promo_id orqali tekshirish.
+        # promo_id * -1 o'rniga promo_id + 100000 offset ishlatamiz (task_id < 0 bo'lmaydi).
         async with db.execute(
             "SELECT 1 FROM user_tasks WHERE user_id = ? AND task_id = ?",
-            (message.from_user.id, promo["id"] * -1)
+            (message.from_user.id, promo["id"] + 100000)
         ) as cur:
             used = await cur.fetchone()
 
@@ -429,7 +433,7 @@ async def promo_check(message: Message, state: FSMContext):
 
         await db.execute(
             "INSERT OR IGNORE INTO user_tasks (user_id, task_id) VALUES (?, ?)",
-            (message.from_user.id, promo["id"] * -1)
+            (message.from_user.id, promo["id"] + 100000)
         )
         await db.execute(
             "UPDATE promo_codes SET uses_left = uses_left - 1 WHERE id = ?",

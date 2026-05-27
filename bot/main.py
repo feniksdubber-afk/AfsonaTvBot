@@ -12,6 +12,7 @@ Router ulash tartibi (muhim!):
   6. admin                — admin panel (ichida 5 ta sub-router)
   7. premium              — premium va to'lov handlerlari
   8. gamification         — ball tizimi, vazifalar, turnir
+ 12. webapp               — Telegram Mini App + telefon ulashish (OTP login)
 
 Middleware tartibi:
   1. AuthMiddleware         — foydalanuvchi yaratish, ban tekshirish, lang
@@ -45,6 +46,7 @@ from bot.handlers import admin_channels
 from bot.handlers import omdb
 from bot.handlers import franchise
 from bot.handlers import admin_edit
+from bot.handlers import webapp as webapp_handler
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.subscription import SubscriptionMiddleware
 from bot.utils.scheduler import setup_scheduler
@@ -95,6 +97,7 @@ async def main() -> None:
     dp.include_router(omdb.router)                   # 9
     dp.include_router(franchise.router)              # 10
     dp.include_router(admin_edit.router)             # 11
+    dp.include_router(webapp_handler.router)         # 12 — Mini App + telefon ulashish
 
     # ── Scheduler ────────────────────────────────────────────────────
     scheduler = setup_scheduler(bot)
